@@ -101,4 +101,5 @@ def test_context_is_bounded_and_deterministic(tmp_path: Path):
         path = tmp_path / name; path.write_text(name)
         paths.append(path)
     assert len(select_relevant_files("one", paths, max_files=2)) == 2
-    assert len(read_context(paths, max_total_bytes=10)) <= 10 + len("\n--- ") * 3 + 100
+    context = read_context(paths, max_total_bytes=10)
+    assert len(context.encode("utf-8")) <= 10

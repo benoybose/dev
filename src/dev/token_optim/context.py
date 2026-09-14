@@ -36,6 +36,11 @@ def read_context(files: list[Path], max_file_bytes: int = 1_000_000, max_total_b
             continue
         remaining = max_total_bytes - total
         header = f"\n--- {path} ---\n"
+        header_bytes = header.encode("utf-8")
+        if len(header_bytes) >= remaining:
+            chunks.append(header_bytes[:remaining].decode("utf-8", errors="ignore"))
+            total = max_total_bytes
+            break
         remaining_content = max(0, remaining - len(header.encode("utf-8")))
         content = content.encode("utf-8")[:remaining_content].decode("utf-8", errors="ignore")
         chunks.append(header + content)
