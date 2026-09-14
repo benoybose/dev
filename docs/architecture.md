@@ -1,0 +1,656 @@
+# `dev`: A Detailed Blueprint for Building an AI Coding Agent as a Local TUI and CLI
+
+## Executive Summary
+
+`dev` is a locally installed AI coding agent that works with any OpenAI-compatible inference API (including tool calling). It uses **LangChain** and **LangGraph** for the agentic harness, **Textual** for the terminal UI, **Typer** for the CLI entrypoint, and local embeddings for client-side token optimization. Users reference files and directories with `@` mentions and control sessions and agents with a minimal set of slash commands.
+
+---
+
+## 1. Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      User Interface Layer                    │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │  Textual TUI │  │  Typer CLI   │  │Session Mgr   │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+├─────────────────────────────────────────────────────────────┤
+│                 Agentic Harness (Multi-Agent)                │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │        LangGraph State Machine / Supervisor            │  │
+│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐    │  │
+│  │  │ Planner │ │  Coder  │ │ Tester  │ │  Docs   │    │  │
+│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘    │  │
+│  └──────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────┤
+│              Token Optimization Layer (Client-Side)          │
+│  ┌────────────────────┐  ┌─────────────────────────────┐  │
+│  │ Local Embeddings   │  │ Semantic Cache + Context    │  │
+│  │ (ONNX INT8)        │  │ Selection (@ file mentions) │  │
+│  └────────────────────┘  └─────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────┤
+│                    Model Abstraction Layer                   │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  LangChain ChatOpenAI (configurable base_url)         │  │
+│  │  → Any OpenAI-compatible endpoint                     │  │
+│  │    (LiteLLM / vLLM / Ollama / OpenAI / etc.)          │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2. Technology Choices and Dependencies
+
+### Core Frameworks
+
+| Component | Library | Purpose |
+|---|---|---|
+| Agent orchestration | `langchain` + `langgraph` | State machine, tool calling, multi-agent coordination |
+| TUI | `textual` | Rich terminal interface with containers, events, actions |
+| CLI | `typer` | Command registration, argument parsing, help text |
+| Input completion | `prompt_toolkit` | `@` file/directory fuzzy completion |
+| Local embeddings | `sentence-transformers` or `onnxruntime` | Client-side token optimization, zero API calls |
+| Vector storage | `chromadb` or `sqlite-vec` | Semantic cache and memory storage |
+| Model client | `langchain-openai` | Any OpenAI-compatible API |
+
+### Why These Libraries
+
+**LangGraph over a simple AgentExecutor**: Coding tasks require multi-step state management (read file → analyze → edit → test → fix). LangGraph provides an explicit state machine with conditional branching, loops, and interrupt/resume. Multi-agent patterns (Supervisor / Swarm) are production-proven.
+
+**Local embeddings for token optimization**: Quantized INT8 models like `intelli-embed-v2` run on CPU at roughly 10ms per embedding and achieve ~98% of Azure text-embedding-3-small quality. The key advantage: **zero API calls** — embedding computation consumes no inference tokens.
+
+---
+
+## 3. Project Structure
+
+```
+dev/
+├── pyproject.toml
+├── README.md
+├── src/dev/
+│   ├── __init__.py
+│   ├── main.py                 # Entry: TUI or CLI
+│   ├── config.py               # Env vars, API endpoint config
+│   ├── llm.py                  # ChatOpenAI factory
+│   │
+│   ├── agents/                 # Agent definitions
+│   │   ├── __init__.py
+│   │   ├── graph.py            # LangGraph state graph builder
+│   │   ├── supervisor.py       # Supervisor routing logic
+│   │   ├── coding_agent.py     # Coding agent
+│   │   ├── planning_agent.py   # Planning agent
+│   │   └── tools.py            # File, Git, test tools
+│   │
+│   ├── harness/                # Agentic harness
+│   │   ├── __init__.py
+│   │   ├── state.py            # Session state definition
+│   │   ├── session.py          # Session persistence
+│   │   └── permissions.py      # File access permission rules
+│   │
+│   ├── tui/                    # Textual interface
+│   │   ├── app.py              # Main TUI app
+│   │   ├── widgets/
+│   │   │   ├── chat_view.py    # Conversation display
+│   │   │   ├── input_bar.py    # Input bar + @ completion
+│   │   │   └── status_bar.py   # Agent status, token count
+│   │   └── styles.tcss
+│   │
+│   ├── cli/                    # Typer commands
+│   │   ├── app.py              # Typer app
+│   │   └── commands.py         # Subcommands
+│   │
+│   ├── token_optim/            # Token optimization
+│   │   ├── __init__.py
+│   │   ├── embeddings.py       # Local embedding wrapper
+│   │   ├── cache.py            # Semantic cache
+│   │   └── context.py          # Context compression
+│   │
+│   └── completion/             # @ completion
+│       ├── __init__.py
+│       ├── file_path.py        # File path completer
+│       └── parser.py           # @ mention parser
+│
+└── tests/
+```
+
+---
+
+## 4. Core Implementation Details
+
+### 4.1 Model Abstraction: Any OpenAI-Compatible API
+
+`dev` is not bound to any provider. Users specify the endpoint via environment variables or a config file:
+
+```python
+# config.py
+import os
+from langchain_openai import ChatOpenAI
+
+def create_llm() -> ChatOpenAI:
+    """Create a ChatOpenAI instance pointing at any OpenAI-compatible endpoint."""
+    base_url = os.getenv("DEV_BASE_URL", "http://localhost:4000/v1")
+    api_key = os.getenv("DEV_API_KEY", "sk-placeholder")
+    model = os.getenv("DEV_MODEL", "gpt-4o")
+
+    return ChatOpenAI(
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        temperature=0.1,
+        max_retries=2,
+    )
+```
+
+**LiteLLM integration example**: LiteLLM Proxy exposes a unified OpenAI-compatible endpoint that routes to 100+ providers. Users start the proxy:
+
+```bash
+litellm --config litellm_config.yaml --port 4000
+export DEV_BASE_URL=http://localhost:4000
+export DEV_API_KEY=sk-your-master-key
+export DEV_MODEL=gpt-4o  # Must match model_name in the LiteLLM config
+```
+
+**Key constraint**: `DEV_MODEL` must match the `model_name` alias in the LiteLLM config, not the upstream raw model name.
+
+### 4.2 Agentic Harness (Multi-Agent Coordination)
+
+Choose the **Supervisor pattern** because coding tasks require centralized control (who edited which file, when to test).
+
+```python
+# agents/graph.py
+from langgraph.graph import StateGraph, END
+from typing import Literal, TypedDict
+
+class DevState(TypedDict):
+    messages: list
+    task: str
+    active_agent: str
+    files_in_context: list[str]
+    token_count: int
+
+def build_dev_graph():
+    """Build the supervisor-subagent state graph."""
+    workflow = StateGraph(DevState)
+
+    # Nodes
+    workflow.add_node("supervisor", supervisor_node)
+    workflow.add_node("planner", planning_agent_node)
+    workflow.add_node("coder", coding_agent_node)
+    workflow.add_node("tester", testing_agent_node)
+    workflow.add_node("doc_writer", doc_agent_node)
+
+    # Edges
+    workflow.set_entry_point("supervisor")
+
+    workflow.add_conditional_edges(
+        "supervisor",
+        route_from_supervisor,
+        {
+            "planner": "planner",
+            "coder": "coder",
+            "tester": "tester",
+            "doc_writer": "doc_writer",
+            "FINISH": END,
+        }
+    )
+
+    # Subagents return to supervisor after completion
+    for agent in ["planner", "coder", "tester", "doc_writer"]:
+        workflow.add_edge(agent, "supervisor")
+
+    return workflow.compile()
+```
+
+**Supervisor routing logic**:
+
+```python
+def supervisor_node(state: DevState) -> DevState:
+    """Supervisor decides which agent to delegate to next."""
+    # Use an LLM to analyze the current state and task
+    # Return an active_agent update
+    ...
+
+def route_from_supervisor(state: DevState) -> Literal[
+    "planner", "coder", "tester", "doc_writer", "FINISH"
+]:
+    return state["active_agent"]
+```
+
+**Performance trade-off**: The supervisor pattern adds one extra model call (results must be summarized by the supervisor) compared to a simple single-agent setup, but it provides centralized control. For a coding agent, that overhead is worth it because the supervisor maintains a global view of files.
+
+### 4.3 Session Handling and Concurrent Agents
+
+Session state is persisted to local SQLite:
+
+```python
+# harness/session.py
+import sqlite3
+import json
+from pathlib import Path
+
+class SessionStore:
+    def __init__(self, db_path: Path = Path.home() / ".dev" / "sessions.db"):
+        self.db_path = db_path
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    name TEXT,
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP,
+                    state TEXT,  -- JSON-serialized DevState
+                    metadata TEXT
+                )
+            """)
+
+    def save(self, session_id: str, name: str, state: dict):
+        """Save session state."""
+        ...
+
+    def load(self, session_id: str) -> dict:
+        """Load a session."""
+        ...
+
+    def list_sessions(self) -> list[dict]:
+        """List all sessions."""
+        ...
+```
+
+**Concurrent agents**: Different sessions can run different agent-graph instances simultaneously. Each `dev` process maintains its own `SessionStore` connection and LangGraph state. For parallel agents (e.g., running coder and tester at the same time), use Python `asyncio`:
+
+```python
+# Run multiple agent tasks in parallel
+async def run_parallel_agents(agents: list, state: DevState):
+    tasks = [agent.ainvoke(state) for agent in agents]
+    results = await asyncio.gather(*tasks)
+    return results
+```
+
+### 4.4 Dual-Mode TUI and CLI
+
+**Typer CLI entrypoint**:
+
+```python
+# cli/app.py
+import typer
+from dev.tui.app import DevTUI
+from dev.harness.session import SessionStore
+
+app = typer.Typer(help="dev - AI coding agent", no_args_is_help=False)
+
+@app.command()
+def tui(session: str = typer.Option(None, "--session", "-s")):
+    """Launch the TUI interface."""
+    tui_app = DevTUI(session_id=session)
+    tui_app.run()
+
+@app.command()
+def ask(prompt: str, session: str = typer.Option(None, "--session", "-s")):
+    """Run a single CLI query."""
+    ...
+
+@app.command()
+def sessions():
+    """List all sessions."""
+    store = SessionStore()
+    for s in store.list_sessions():
+        typer.echo(f"{s['id'][:8]}  {s['name']}  {s['updated_at']}")
+
+if __name__ == "__main__":
+    app()
+```
+
+Users launch the interactive interface with `dev tui`, or run a one-shot query with `dev ask "fix the login bug"`.
+
+**Textual TUI structure**:
+
+```python
+# tui/app.py
+from textual.app import App, ComposeResult
+from textual.containers import Vertical
+from textual.widgets import Static, Input, RichLog
+
+class DevTUI(App):
+    CSS_PATH = "styles.tcss"
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield RichLog(id="chat-view", wrap=True)
+            yield Input(placeholder="Enter a task... use @ to reference files", id="input-bar")
+            yield Static("agent: idle | tokens: 0", id="status-bar")
+
+    def on_input_submitted(self, event: Input.Submitted):
+        """Handle user input and trigger the agent graph."""
+        user_input = event.value
+        cleaned, files = parse_file_mentions(user_input)
+        self.run_worker(self._invoke_agent(cleaned, files))
+
+    async def _invoke_agent(self, text: str, files: list):
+        """Run LangGraph inside a background worker."""
+        graph = build_dev_graph()
+        result = await graph.ainvoke({...})
+        self.query_one("#chat-view").write(result["messages"][-1].content)
+```
+
+Textual's async worker model is a natural fit for long-running agent tasks without blocking the UI.
+
+### 4.5 `@` File and Directory Mentions
+
+Use `prompt_toolkit`'s `Completer` to implement `@`-triggered completion. Known pitfall: **do not decorate the completion method with `@staticmethod`**, because the completion path needs access to `self` to call file-search methods. Using `@staticmethod` causes a `NameError` crash on bare `@`.
+
+```python
+# completion/file_path.py
+from prompt_toolkit.completion import Completer, Completion
+from pathlib import Path
+
+class FilePathCompleter(Completer):
+    """Trigger file path completion after @."""
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        # Detect @ trigger
+        if not text.endswith("@") and "@" not in text.split()[-1]:
+            return
+
+        # Extract the path fragment after @
+        word = text.split()[-1]
+        if not word.startswith("@"):
+            return
+
+        query = word[1:]  # Strip @
+        yield from self._file_completions(query, limit=30)
+
+    def _file_completions(self, query: str, limit: int = 30):
+        """Fuzzy-match file paths."""
+        cwd = Path.cwd()
+        # If query contains /, resolve as a relative path
+        if "/" in query:
+            base = cwd / query.rsplit("/", 1)[0]
+            partial = query.rsplit("/", 1)[1]
+        else:
+            base = cwd
+            partial = query
+
+        if not base.exists():
+            return
+
+        count = 0
+        for item in base.iterdir():
+            if count >= limit:
+                break
+            name = item.name
+            if partial.lower() in name.lower():
+                prefix = query.rsplit("/", 1)[0] + "/" if "/" in query else ""
+                display = f"@{prefix}{name}"
+                if item.is_dir():
+                    display += "/"
+                yield Completion(display, start_position=-len(word))
+                count += 1
+```
+
+**`@` mention parser**: Extract file paths from user input and load them into context:
+
+```python
+# completion/parser.py
+import re
+from pathlib import Path
+
+# Simple pattern: @ followed by valid filename chars, stopping at whitespace/punctuation
+MENTION_PATTERN = re.compile(r'@([A-Za-z0-9._/~-]+)')
+
+def parse_file_mentions(text: str) -> tuple[str, list[Path]]:
+    """Extract @ file mentions; return cleaned text and resolved paths."""
+    matches = MENTION_PATTERN.findall(text)
+    files = []
+    for match in matches:
+        path = Path(match).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        if path.exists():
+            files.append(path.resolve())
+
+    # Remove @ markers from text (or keep for display)
+    cleaned = MENTION_PATTERN.sub(lambda m: f"[file:{m.group(1)}]", text)
+    return cleaned, files
+```
+
+### 4.6 Token Optimization: Client-Side Local Embeddings
+
+**Core idea**: Before sending anything to the inference API, local embeddings serve two purposes: (1) semantic caching of repeated queries, and (2) intelligent selection of relevant file context.
+
+**Local embedding configuration**:
+
+```python
+# token_optim/embeddings.py
+import onnxruntime as ort
+from transformers import AutoTokenizer
+import numpy as np
+
+class LocalEmbedder:
+    """ONNX INT8 local embeddings, no API calls."""
+
+    def __init__(self, model_path: str = "serhiiseletskyi/intelli-embed-v2"):
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        self.session = ort.InferenceSession(
+            f"{model_path}/onnx/model_quantized.onnx",
+            providers=["CPUExecutionProvider"]
+        )
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        """Return L2-normalized embedding vectors."""
+        enc = self.tokenizer(
+            texts, padding=True, truncation=True,
+            max_length=512, return_tensors="np"
+        )
+        out = self.session.run(
+            None,
+            {"input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"]}
+        )[0]
+        mask = enc["attention_mask"][..., None].astype(np.float32)
+        pooled = (out * mask).sum(1) / mask.sum(1)
+        return pooled / np.linalg.norm(pooled, axis=1, keepdims=True)
+```
+
+**Semantic cache**: Embed user queries, compare against historical queries via cosine similarity. If similarity exceeds a threshold (e.g., 0.95), return the cached response with zero token cost.
+
+```python
+# token_optim/cache.py
+import sqlite3
+import numpy as np
+from pathlib import Path
+from dev.token_optim.embeddings import LocalEmbedder
+
+class SemanticCache:
+    def __init__(self, db_path: str = "~/.dev/cache.db", threshold: float = 0.95):
+        self.db_path = Path(db_path).expanduser()
+        self.threshold = threshold
+        self.embedder = LocalEmbedder()
+        self._init_db()
+
+    def _init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS cache (
+                    query_embedding BLOB,
+                    response TEXT,
+                    created_at TIMESTAMP
+                )
+            """)
+
+    def get(self, query: str) -> str | None:
+        """Look up a semantically similar cached response."""
+        query_vec = self.embedder.embed([query])[0]
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT query_embedding, response FROM cache"
+            ).fetchall()
+        for emb_blob, response in rows:
+            emb = np.frombuffer(emb_blob, dtype=np.float32)
+            similarity = float(np.dot(query_vec, emb))  # already normalized
+            if similarity >= self.threshold:
+                return response
+        return None
+
+    def set(self, query: str, response: str):
+        """Store a query-response pair."""
+        emb = self.embedder.embed([query])[0]
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO cache (query_embedding, response, created_at) "
+                "VALUES (?, ?, CURRENT_TIMESTAMP)",
+                (emb.tobytes(), response)
+            )
+```
+
+**Intelligent context selection**: When the user references many files with `@`, local embeddings can filter down to the most relevant files instead of sending all of them:
+
+```python
+# token_optim/context.py
+import numpy as np
+from pathlib import Path
+from dev.token_optim.embeddings import LocalEmbedder
+
+def select_relevant_files(
+    query: str,
+    candidate_files: list[Path],
+    max_files: int = 5,
+    embedder: LocalEmbedder | None = None,
+) -> list[Path]:
+    """Select the N most relevant files for a query."""
+    if len(candidate_files) <= max_files:
+        return candidate_files
+
+    embedder = embedder or LocalEmbedder()
+
+    # Read a snippet of each file (first 500 chars)
+    contents = []
+    for f in candidate_files:
+        try:
+            contents.append(f.read_text()[:500])
+        except Exception:
+            contents.append("")
+
+    query_vec = embedder.embed([query])
+    file_vecs = embedder.embed(contents)
+
+    similarities = (query_vec @ file_vecs.T).flatten()
+    top_indices = np.argsort(similarities)[-max_files:][::-1]
+    return [candidate_files[i] for i in top_indices]
+```
+
+**Expected token savings**: Local embedding computation uses zero API tokens. Semantic caching saves 100% of inference tokens on repeated queries. Intelligent file selection can reduce large-project context by 60-80%. The combined effect depends on usage patterns, but client-side embedding is pure upside — it only costs local CPU time (~10ms per embedding).
+
+### 4.7 Minimal Slash Commands
+
+Following the "sufficient and minimal" principle, keep only 5 core commands:
+
+| Command | Purpose | Implementation |
+|---|---|---|
+| `/help` | Show available commands and usage | Static text |
+| `/session` | List, switch, and name sessions | Calls `SessionStore` |
+| `/agent` | Switch active agent (coder/planner/tester/docs) | Mutates `DevState.active_agent` |
+| `/clear` | Clear current session context | Resets the `messages` list |
+| `/exit` | Quit the TUI | Triggers Textual `action_quit` |
+
+Intercept input beginning with `/` in the TUI's `Input` widget:
+
+```python
+def on_input_submitted(self, event: Input.Submitted):
+    value = event.value.strip()
+    if value.startswith("/"):
+        self._handle_slash_command(value)
+    else:
+        self._handle_task(value)
+
+def _handle_slash_command(self, cmd: str):
+    parts = cmd.split(maxsplit=1)
+    command = parts[0].lower()
+    args = parts[1] if len(parts) > 1 else ""
+
+    if command == "/help":
+        self.query_one("#chat-view").write(HELP_TEXT)
+    elif command == "/session":
+        self._handle_session_command(args)
+    elif command == "/agent":
+        self._handle_agent_switch(args)
+    elif command == "/clear":
+        self._clear_context()
+    elif command == "/exit":
+        self.exit()
+    else:
+        self.query_one("#chat-view").write(
+            f"Unknown command: {command}. Type /help for available commands."
+        )
+```
+
+---
+
+## 5. Installation and Usage
+
+### Installation
+
+```bash
+# From source
+git clone https://github.com/your-org/dev.git
+cd dev
+pip install -e .
+
+# Or from PyPI
+pip install dev-coding-agent
+```
+
+### Configuration
+
+Set the following in `~/.dev/config.env` or your shell environment:
+
+```bash
+export DEV_BASE_URL="https://your-litellm-proxy.com/v1"
+export DEV_API_KEY="sk-..."
+export DEV_MODEL="claude-sonnet-4"  # or any LiteLLM alias
+```
+
+### Usage
+
+```bash
+# Launch the TUI
+dev tui
+
+# Launch the TUI with a named session
+dev tui --session "auth-bug-fix"
+
+# One-shot CLI query
+dev ask "Fix the login validation logic in @src/auth.py"
+
+# List sessions
+dev sessions
+```
+
+---
+
+## 6. Key Design Decisions Summary
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Agent orchestration | LangGraph Supervisor | Coding tasks require centralized file-state management; production-proven |
+| TUI framework | Textual | Async worker model fits long-running agents; rich layout system |
+| CLI framework | Typer | Clean command registration; automatic help text |
+| Local embeddings | intelli-embed-v2 (ONNX INT8) | ~10ms per embedding on CPU; zero API calls; ~98% of Azure quality |
+| Model interface | ChatOpenAI with base_url | Any OpenAI-compatible endpoint; 100+ providers via LiteLLM |
+| `@` completion | prompt_toolkit Completer | Mature fuzzy matching; avoid the `@staticmethod` crash pitfall |
+| Session storage | SQLite | Zero configuration; supports concurrent sessions; easy to query |
+
+---
+
+## 7. Extension Directions
+
+1. **Git integration**: Agent automatically diffs and commits after edits; `@diff` mention for review.
+2. **Test-runner agent**: Automatically runs pytest after code edits and triggers a fix loop on failure.
+3. **Project memory**: Embed `AGENTS.md` and code conventions into a local vector store; the agent auto-loads relevant memory at startup.
+4. **Sandboxed execution**: For untrusted generated code, run tests in a subprocess with restricted filesystem write access.
+5. **Streaming tool calls**: Stream tool-call deltas to the TUI for a more responsive feel on long edits.
+6. **Per-session model switching**: `/agent` could also switch the underlying model per subagent (e.g., a cheap model for planning, a strong model for coding).

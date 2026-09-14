@@ -1,0 +1,11 @@
+# Direct optional runtime dependencies audited by CI.
+langchain>=1.0
+langgraph>=1.0
+langchain-openai>=1.0
+langchain-anthropic>=1.0
+langchain-google-genai>=2.0
+langgraph-checkpoint-sqlite>=2.0
+textual>=0.70
+typer>=0.12
+langsmith>=0.2
+sentence-transformers>=3.0
