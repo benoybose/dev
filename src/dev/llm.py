@@ -23,7 +23,7 @@ def invoke_with_retry(model: Any, prompt: Any, *, attempts: int = 3, base_delay:
 def create_llm(settings: Any):
     """Create a LangChain chat model lazily so the base package remains offline-capable."""
     try:
-        if settings.provider in {"openai", "azure"}:
+        if settings.provider in {"openai", "openrouter", "ollama", "azure"}:
             from langchain_openai import ChatOpenAI
             kwargs = {"model": settings.model, "api_key": settings.api_key, "temperature": 0.1, "max_retries": 2}
             if settings.provider == "azure":

@@ -4,12 +4,12 @@
 
 `dev` is at a production-candidate stage for local validation. The core
 package, CLI, TUI, LangGraph supervisor, approval controls, sessions, local
-context optimization, testing hooks, packaging, and CI definitions are in
-place.
+context optimization, testing hooks, provider/model configuration commands,
+packaging, and CI definitions are in place.
 
 Current local validation:
 
-- 25 automated tests are defined; the suite includes session import/export,
+- 29 automated tests are defined; the suite includes session import/export,
   versioning, and framework-detection coverage.
 - Ruff and Python compilation passing.
 - Textual pilot tests passing.

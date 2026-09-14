@@ -29,6 +29,24 @@ if App is not object:
             self.done(decision)
             self.dismiss(decision)
 
+    class SecretInputModal(ModalScreen):
+        def __init__(self, done):
+            super().__init__()
+            self.done = done
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="secret-dialog"):
+                yield Label("Enter API key (input is masked; it will not be shown in the conversation)")
+                yield Input(placeholder="API key", password=True, id="secret-input")
+                yield Button("Save", id="save")
+                yield Button("Cancel", id="cancel")
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "save":
+                value = self.query_one("#secret-input", Input).value
+                self.done(value)
+            self.dismiss()
+
     class DevTUI(App):
         CSS_PATH = None
 
@@ -52,7 +70,62 @@ if App is not object:
             elif value == "/clear":
                 self.query_one("#chat-view", RichLog).clear()
             elif value == "/help":
-                self.query_one("#chat-view", RichLog).write("/help /session [name|rename|export|import] /agent /clear /rollback /cancel /exit")
+                self.query_one("#chat-view", RichLog).write("/help /provider /model /api-key /config /session /agent /clear /rollback /cancel /exit")
+            elif value == "/provider list":
+                from dev.configuration import PROVIDERS
+                names = ", ".join(sorted(PROVIDERS))
+                self.query_one("#chat-view", RichLog).write("Providers: " + names)
+            elif value.startswith("/provider use "):
+                from dev.configuration import ConfigurationError, UserConfig
+                provider = value.partition(" ")[2].partition(" ")[2].strip()
+                try:
+                    UserConfig().set_provider(provider)
+                    self.query_one("#chat-view", RichLog).write(f"Provider saved: {provider}. New runs will use it.")
+                except ConfigurationError as exc:
+                    self.query_one("#chat-view", RichLog).write(str(exc))
+            elif value == "/model list":
+                from dev.config import Settings
+                from dev.configuration import ConfigurationError, list_models
+                settings = Settings.load()
+                try:
+                    models = list_models(settings.base_url, settings.api_key)
+                    if not models:
+                        self.query_one("#chat-view", RichLog).write("No models returned by the provider.")
+                    else:
+                        lines = [f"{item.identifier}"
+                                 + (" [free]" if item.free else "")
+                                 + (" [tools]" if item.tool_calling else "") for item in models[:100]]
+                        self.query_one("#chat-view", RichLog).write("\n".join(lines))
+                except ConfigurationError as exc:
+                    self.query_one("#chat-view", RichLog).write(str(exc))
+            elif value.startswith("/model use "):
+                from dev.configuration import ConfigurationError, UserConfig
+                model = value.partition(" ")[2].partition(" ")[2].strip()
+                try:
+                    UserConfig().set_model(model)
+                    self.query_one("#chat-view", RichLog).write(f"Model saved: {model}. New runs will use it.")
+                except ConfigurationError as exc:
+                    self.query_one("#chat-view", RichLog).write(str(exc))
+            elif value == "/api-key set":
+                from dev.configuration import ConfigurationError, UserConfig
+                def save_key(api_key: str) -> None:
+                    try:
+                        UserConfig().set_api_key(api_key)
+                        self.query_one("#chat-view", RichLog).write("API key saved securely to the user configuration file.")
+                    except ConfigurationError as exc:
+                        self.query_one("#chat-view", RichLog).write(str(exc))
+                self.push_screen(SecretInputModal(save_key))
+            elif value == "/config show":
+                from dev.config import Settings
+                from dev.configuration import mask_secret
+                settings = Settings.load()
+                self.query_one("#chat-view", RichLog).write(
+                    f"provider: {settings.provider}\nbase_url: {settings.base_url}\nmodel: {settings.model}\napi_key: {mask_secret(settings.api_key)}\nworkspace: {settings.workspace}"
+                )
+            elif value == "/config reload":
+                from dev.config import Settings
+                settings = Settings.load()
+                self.query_one("#chat-view", RichLog).write(f"Configuration reloaded: {settings.provider} / {settings.model}")
             elif value == "/session":
                 from dev.config import Settings
                 from dev.harness.session import SessionStore

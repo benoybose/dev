@@ -71,8 +71,99 @@ python -m pip install --upgrade pip
 python -m pip install -c constraints.txt -e ".[agent,tui,cli,dev]"
 ```
 
-The extras install the core agent runtime, Textual TUI, Typer CLI, and local
-development tools. Use `.[all]` when every optional dependency is required.
+### What the installation command does
+
+```text
+python -m pip install -c constraints.txt -e ".[agent,tui,cli,dev]"
+```
+
+Each part has a specific purpose:
+
+| Part | Meaning |
+|---|---|
+| `python -m pip` | Runs pip through the active Python interpreter, preventing installation into a different Python installation. |
+| `install` | Installs the project and its dependencies. |
+| `-c constraints.txt` | Applies the repository's tested dependency versions where specified. It improves reproducibility without replacing the package's dependency declarations. |
+| `-e` | Installs the project in editable mode. Source changes under `src/dev` are available immediately without reinstalling. |
+| `.` | Installs the project from the current repository directory. |
+| `[agent,tui,cli,dev]` | Installs the selected optional dependency groups. |
+
+The selected extras provide:
+
+- `agent`: LangChain, LangGraph, SQLite checkpoint support, and the OpenAI-compatible model adapter.
+- `tui`: Textual for the terminal user interface.
+- `cli`: Typer for the `dev` command and subcommands.
+- `dev`: pytest, coverage tooling, Ruff, and Pyright for development and validation.
+
+The command also installs the project's base dependencies, including the
+configuration/runtime libraries and `prompt-toolkit` for file completion.
+
+### Why use the constraints file?
+
+`constraints.txt` records versions validated by the repository's CI workflow.
+It limits dependency drift while still allowing pip to resolve transitive
+dependencies required by the selected extras. When intentionally upgrading a
+dependency, update the constraints file deliberately and rerun the complete
+test suite across the supported Python versions.
+
+The constraints file does not install packages by itself. This command is
+still required because the project and its extras are installed by the `-e`
+argument.
+
+### Verify the installation
+
+Confirm that pip and Python resolve to the same virtual environment:
+
+Linux and macOS:
+
+```bash
+python -c "import sys; print(sys.executable)"
+python -m pip --version
+```
+
+Windows PowerShell:
+
+```powershell
+python -c "import sys; print(sys.executable)"
+python -m pip --version
+```
+
+Then verify the installed project and console launcher:
+
+```text
+python -m pip show dev-coding-agent
+dev --help
+dev doctor
+```
+
+`pip show` should report the repository location as the editable project
+location. `dev doctor` should report the workspace and installed optional
+dependencies.
+
+### Common installation variations
+
+Install only the CLI when agent and TUI dependencies are not needed:
+
+```text
+python -m pip install -e ".[cli]"
+```
+
+Install the full optional dependency set, including embeddings and tracing:
+
+```text
+python -m pip install -e ".[all]"
+```
+
+Reapply the validated constraints after changing branches or pulling updated
+dependency metadata:
+
+```text
+python -m pip install --upgrade -c constraints.txt -e ".[agent,tui,cli,dev]"
+```
+
+Avoid installing into the system Python for development. Keeping the project
+inside `.venv` makes the `dev` launcher, tests, and dependency versions
+isolated from other projects.
 
 ## How the `dev` command is created
 
@@ -118,48 +209,119 @@ launcher can also be called directly without activation:
 .\.venv\Scripts\dev.exe doctor
 ```
 
+## Make `dev` available from every directory
+
+For ongoing development, use a dedicated user virtual environment instead of
+installing into the system Python. Install the repository in editable mode and
+add that environment's launcher directory to the user `PATH`.
+
+### Windows PowerShell
+
+```powershell
+py -3.12 -m venv "$env:USERPROFILE\.venvs\dev-coding-agent"
+& "$env:USERPROFILE\.venvs\dev-coding-agent\Scripts\python.exe" `
+  -m pip install -c C:\Projects\dev\constraints.txt `
+  -e "C:\Projects\dev[agent,tui,cli,dev]"
+```
+
+Add the launcher directory permanently to the user `PATH`:
+
+```powershell
+$devScripts = "$env:USERPROFILE\.venvs\dev-coding-agent\Scripts"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if (($userPath -split ";") -notcontains $devScripts) {
+    [Environment]::SetEnvironmentVariable("Path", "$devScripts;$userPath", "User")
+}
+```
+
+Open a new PowerShell window and verify:
+
+```powershell
+Get-Command dev
+dev doctor
+```
+
+### Linux and macOS
+
+```bash
+python3 -m venv ~/.venvs/dev-coding-agent
+~/.venvs/dev-coding-agent/bin/python \
+  -m pip install -c /path/to/dev/constraints.txt \
+  -e "/path/to/dev[agent,tui,cli,dev]"
+```
+
+Add the launcher directory to the shell startup file:
+
+```bash
+echo 'export PATH="$HOME/.venvs/dev-coding-agent/bin:$PATH"' >> ~/.profile
+export PATH="$HOME/.venvs/dev-coding-agent/bin:$PATH"
+```
+
+For macOS users running Zsh, use `~/.zshrc` instead of `~/.profile`.
+Verify with:
+
+```bash
+which dev
+dev doctor
+```
+
+The editable install means changes under the repository's `src/dev` directory
+are available from every working directory without reinstalling. Reinstall
+only after changing dependencies or package metadata.
+
+When invoking `dev` from another project, use the user-wide
+`~/.dev/config.env` for provider settings. The CLI always uses the current
+working directory as its workspace; change directories before invoking `dev`.
+The programmatic `Settings.load(workspace=...)` override is reserved for
+library callers and tests.
+
 ## Configure a provider
 
-The CLI loads configuration from environment variables and, when present,
-`~/.dev/config.env`. Environment variables take precedence.
+The CLI loads configuration from environment variables, a workspace `.env`
+file, and (when present) `~/.dev/config.env`. Environment variables take
+precedence over the workspace file, which takes precedence over the user file.
+Copy `.env.example` to `.env` for local development. The real `.env` file is
+ignored by Git.
 
-For an OpenAI-compatible endpoint, configure the current shell as follows.
+For OpenRouter, which exposes an OpenAI-compatible endpoint, configure the
+current shell as follows.
 
 Linux and macOS:
 
 ```bash
-export DEV_BASE_URL="https://api.openai.com/v1"
-export DEV_API_KEY="your-api-key"
-export DEV_MODEL="gpt-4o"
-export DEV_PROVIDER="openai"
-export DEV_WORKSPACE="$PWD"
+export DEV_BASE_URL="https://openrouter.ai/api/v1"
+export DEV_API_KEY="sk-or-v1-your-openrouter-key"
+export DEV_MODEL="poolside/laguna-s-2.1:free"
+export DEV_PROVIDER="openrouter"
 export DEV_APPROVAL_REQUIRED="true"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:DEV_BASE_URL = "https://api.openai.com/v1"
-$env:DEV_API_KEY = "your-api-key"
-$env:DEV_MODEL = "gpt-4o"
-$env:DEV_PROVIDER = "openai"
-$env:DEV_WORKSPACE = (Get-Location).Path
+$env:DEV_BASE_URL = "https://openrouter.ai/api/v1"
+$env:DEV_API_KEY = "sk-or-v1-your-openrouter-key"
+$env:DEV_MODEL = "poolside/laguna-s-2.1:free"
+$env:DEV_PROVIDER = "openrouter"
 $env:DEV_APPROVAL_REQUIRED = "true"
 ```
 
-For persistent configuration, create `~/.dev/config.env`. On Windows this is
+For user-wide persistent configuration, create `~/.dev/config.env`. On Windows this is
 normally `%USERPROFILE%\\.dev\\config.env`.
 
 ```env
-DEV_BASE_URL=https://api.openai.com/v1
-DEV_API_KEY=your-api-key
-DEV_MODEL=gpt-4o
-DEV_PROVIDER=openai
+DEV_PROVIDER=openrouter
+DEV_BASE_URL=https://openrouter.ai/api/v1
+DEV_API_KEY=sk-or-v1-your-openrouter-key
+DEV_MODEL=poolside/laguna-s-2.1:free
 DEV_APPROVAL_REQUIRED=true
 DEV_TEST_COMMAND=pytest
 ```
 
 Never commit API keys or place them in tracked project files.
+
+The recommended acceptance profile is `poolside/laguna-s-2.1:free`. Replace
+the model with another OpenRouter model when testing compatibility.
 
 ## Verify the installation
 
@@ -226,6 +388,29 @@ Resume a named session from the TUI when supported by the installed version:
 ```text
 dev tui --session local-dev
 ```
+
+### TUI provider and model commands
+
+The TUI supports provider configuration without placing secrets in the
+conversation history:
+
+```text
+/provider list
+/provider use openrouter
+/model list
+/model use poolside/laguna-s-2.1:free
+/api-key set
+/config show
+/config reload
+```
+
+`/model list` queries the active OpenAI-compatible provider's `/models`
+endpoint. `/api-key set` opens a masked input and stores the key in the
+user-wide configuration file. `/config show` masks the configured key. New
+agent runs use the updated settings; an active run is not interrupted.
+
+The provider aliases `openrouter` and `ollama` use the OpenAI-compatible
+adapter internally while preserving their provider names in configuration.
 
 If the TUI import is unavailable, install the TUI extra:
 

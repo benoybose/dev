@@ -58,10 +58,35 @@ def test_fingerprint_changes_when_file_changes(tmp_path: Path):
     assert fingerprint_files([path]) != first
 
 
+def test_settings_loads_workspace_dotenv_with_environment_precedence(tmp_path: Path, monkeypatch):
+    (tmp_path / ".env").write_text(
+        "DEV_BASE_URL=https://workspace.example/v1\nDEV_MODEL=workspace-model\nDEV_APPROVAL_REQUIRED=false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("DEV_BASE_URL", raising=False)
+    monkeypatch.setenv("DEV_MODEL", "environment-model")
+    monkeypatch.delenv("DEV_APPROVAL_REQUIRED", raising=False)
+
+    settings = Settings.load(workspace=tmp_path)
+
+    assert settings.base_url == "https://workspace.example/v1"
+    assert settings.model == "environment-model"
+    assert settings.approval_required is False
+
+
 def test_settings_load_uses_runtime_default_paths():
     settings = Settings.load(workspace=Path.cwd())
     assert settings.session_db.name == "sessions.db"
     assert settings.cache_db.name == "cache.db"
+
+
+def test_cli_workspace_is_always_current_directory(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DEV_WORKSPACE", str(Path.cwd().parent))
+
+    settings = Settings.load()
+
+    assert settings.workspace == tmp_path.resolve()
 
 
 def test_commands_are_gated_and_dangerous_commands_rejected(tmp_path: Path):

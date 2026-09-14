@@ -14,7 +14,10 @@ def _load_env_file(path: Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip('"').strip("'")
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[7:].strip()
+        values[key] = value.strip().strip('"').strip("'")
     return values
 
 
@@ -41,12 +44,19 @@ class Settings:
 
     @classmethod
     def load(cls, *, workspace: Path | None = None) -> Settings:
-        file_values = _load_env_file(Path.home() / ".dev" / "config.env")
+        user_values = _load_env_file(Path.home() / ".dev" / "config.env")
+        cwd = Path.cwd().resolve()
+        # The CLI always operates on the directory from which it was invoked.
+        # ``workspace`` remains available for library callers and tests.
+        root = (workspace or cwd).expanduser().resolve()
+        workspace_values = _load_env_file(root / ".env")
+
         def get(name: str, default: str) -> str:
-            return os.getenv(name, file_values.get(name, default))
+            return os.getenv(name, workspace_values.get(name, user_values.get(name, default)))
+
         def boolean(name: str, default: bool) -> bool:
             return get(name, str(default)).lower() in {"1", "true", "yes", "on"}
-        root = (workspace or Path(get("DEV_WORKSPACE", str(Path.cwd())))).expanduser().resolve()
+
         if not root.is_dir():
             raise ValueError(f"Workspace does not exist: {root}")
         return cls(

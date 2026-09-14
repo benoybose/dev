@@ -562,17 +562,31 @@ def select_relevant_files(
 
 **Expected token savings**: Local embedding computation uses zero API tokens. Semantic caching saves 100% of inference tokens on repeated queries. Intelligent file selection can reduce large-project context by 60-80%. The combined effect depends on usage patterns, but client-side embedding is pure upside — it only costs local CPU time (~10ms per embedding).
 
-### 4.7 Minimal Slash Commands
+### 4.7 Slash Commands
 
-Following the "sufficient and minimal" principle, keep only 5 core commands:
+The TUI provides session, agent, execution, and provider configuration commands:
 
 | Command | Purpose | Implementation |
 |---|---|---|
 | `/help` | Show available commands and usage | Static text |
 | `/session` | List, switch, and name sessions | Calls `SessionStore` |
-| `/agent` | Switch active agent (coder/planner/tester/docs) | Mutates `DevState.active_agent` |
+| `/provider list` | List supported provider aliases | Static provider registry |
+| `/provider use NAME` | Select a provider and its default endpoint | Updates user config |
+| `/model list` | Discover models from an OpenAI-compatible endpoint | Provider `/models` API |
+| `/model use ID` | Select the model for new runs | Updates user config |
+| `/api-key set` | Enter a masked API key | Updates user config securely |
+| `/config show` | Show active settings with a masked key | Reads `Settings` |
+| `/config reload` | Reload and display configuration | Reads `Settings` |
+| `/agent` | Select a requested specialist perspective | Updates run state |
 | `/clear` | Clear current session context | Resets the `messages` list |
+| `/cancel` | Cancel the active run | Signals cancellation token |
+| `/rollback` | Restore safe changes from the current run | Calls `ChangeJournal` |
 | `/exit` | Quit the TUI | Triggers Textual `action_quit` |
+
+Provider and model commands never write API keys to session messages or event
+history. `/api-key set` uses a masked input, and `/config show` masks the
+configured key. OpenRouter and Ollama are provider aliases backed by the
+OpenAI-compatible adapter.
 
 Intercept input beginning with `/` in the TUI's `Input` widget:
 
@@ -621,15 +635,27 @@ pip install -e .
 pip install dev-coding-agent
 ```
 
+For repository development, create a user virtual environment and install the
+checkout in editable mode. Add its `bin` directory on Linux/macOS or `Scripts`
+directory on Windows to the user `PATH` to make `dev` available from any
+working directory. Keep provider credentials in `~/.dev/config.env` when
+working across multiple repositories; use the repository `.env` for
+workspace-specific settings.
+
 ### Configuration
 
-Set the following in `~/.dev/config.env` or your shell environment:
+Set the following in `.env`, `~/.dev/config.env`, or your shell environment.
+For OpenRouter, use the OpenAI-compatible provider adapter:
 
 ```bash
-export DEV_BASE_URL="https://your-litellm-proxy.com/v1"
-export DEV_API_KEY="sk-..."
-export DEV_MODEL="claude-sonnet-4"  # or any LiteLLM alias
+export DEV_PROVIDER="openrouter"
+export DEV_BASE_URL="https://openrouter.ai/api/v1"
+export DEV_API_KEY="sk-or-v1-..."
+export DEV_MODEL="poolside/laguna-s-2.1:free"
 ```
+
+The tracked `.env.example` contains the same OpenRouter acceptance profile.
+Never commit the real `.env` file or an API key.
 
 ### Usage
 
