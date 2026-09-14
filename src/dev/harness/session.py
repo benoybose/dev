@@ -54,6 +54,39 @@ class SessionStore:
         with self._connect() as conn:
             return conn.execute("DELETE FROM sessions WHERE id=? OR name=?", (session_id, session_id)).rowcount > 0
 
+    def rename(self, session_id: str, name: str) -> bool:
+        """Rename a saved session, returning whether it existed."""
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("Session name must not be empty")
+        with self._connect() as conn:
+            return conn.execute("UPDATE sessions SET name=? WHERE id=? OR name=?",
+                                (clean_name, session_id, session_id)).rowcount > 0
+
+    def export_session(self, session_id: str, path: Path) -> Path:
+        """Export one session and its event history as portable JSON."""
+        session = self.load(session_id)
+        if not session:
+            raise KeyError(f"Session not found: {session_id}")
+        payload = {"session": session, "events": self.events(session["id"])}
+        destination = Path(path).expanduser()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return destination
+
+    def import_session(self, path: Path, name: str | None = None) -> str:
+        """Import a previously exported session and return its new session ID."""
+        payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+        source = payload.get("session")
+        if not isinstance(source, dict) or not isinstance(source.get("state"), dict):
+            raise TypeError("Invalid session export")
+        sid = self.save(None, name or str(source.get("name", "imported")), source["state"], source.get("metadata", {}))
+        for item in payload.get("events", []):
+            event = item.get("event")
+            if isinstance(event, dict):
+                self.append_event(sid, str(item.get("run_id", sid)), event)
+        return sid
+
     def append_event(self, session_id: str, run_id: str, event: dict[str, Any]) -> None:
         with self._connect() as conn:
             conn.execute("INSERT INTO session_events(session_id,run_id,event) VALUES(?,?,?)",

@@ -36,6 +36,7 @@ if App is not object:
             super().__init__()
             self.session_id = session_id or "default"
             self._cancellation = None
+            self._requested_agent = "supervisor"
 
         def compose(self) -> ComposeResult:
             with Vertical():
@@ -51,17 +52,23 @@ if App is not object:
             elif value == "/clear":
                 self.query_one("#chat-view", RichLog).clear()
             elif value == "/help":
-                self.query_one("#chat-view", RichLog).write("/help /session /agent /clear /rollback /cancel /exit")
+                self.query_one("#chat-view", RichLog).write("/help /session [name|rename|export|import] /agent /clear /rollback /cancel /exit")
             elif value == "/session":
                 from dev.config import Settings
                 from dev.harness.session import SessionStore
                 sessions = SessionStore(Settings.load().session_db).list_sessions()
                 self.query_one("#chat-view", RichLog).write("\n".join(f"{item['id'][:8]}  {item['name']}" for item in sessions) or "No saved sessions.")
-            elif value.startswith("/session "):
+            elif (value.startswith("/session ") and not value.startswith("/session rename ")
+                  and not value.startswith("/session export ") and not value.startswith("/session import ")):
                 self.session_id = value.partition(" ")[2].strip()
                 self.query_one("#chat-view", RichLog).write(f"Switched to session: {self.session_id}")
             elif value.startswith("/agent"):
-                self.query_one("#status-bar", Static).update(value.partition(" ")[2] or "agent: supervisor")
+                requested = value.partition(" ")[2].strip() or "supervisor"
+                if requested not in {"supervisor", "planner", "coder", "tester"}:
+                    self.query_one("#chat-view", RichLog).write("Choose: supervisor, planner, coder, or tester")
+                else:
+                    self._requested_agent = requested
+                    self.query_one("#status-bar", Static).update(f"agent: {requested}")
             elif value == "/cancel":
                 if self._cancellation:
                     self._cancellation.cancel()
@@ -71,6 +78,33 @@ if App is not object:
                 from dev.harness.changes import ChangeJournal
                 restored = ChangeJournal(Settings.load().session_db).rollback(self.session_id or "")
                 self.query_one("#chat-view", RichLog).write("Restored: " + ", ".join(restored) if restored else "No safe changes to restore.")
+            elif value.startswith("/session rename "):
+                from dev.config import Settings
+                from dev.harness.session import SessionStore
+                name = value.partition(" ")[2].partition(" ")[2].strip()
+                if SessionStore(Settings.load().session_db).rename(self.session_id, name):
+                    self.session_id = name
+                    self.query_one("#chat-view", RichLog).write(f"Renamed session to: {name}")
+                else:
+                    self.query_one("#chat-view", RichLog).write("Session not found.")
+            elif value.startswith("/session export "):
+                from dev.config import Settings
+                from dev.harness.session import SessionStore
+                destination = value.partition(" ")[2].partition(" ")[2].strip()
+                try:
+                    exported = SessionStore(Settings.load().session_db).export_session(self.session_id, destination)
+                    self.query_one("#chat-view", RichLog).write(f"Exported session: {exported}")
+                except (KeyError, OSError, ValueError) as exc:
+                    self.query_one("#chat-view", RichLog).write(f"Export failed: {exc}")
+            elif value.startswith("/session import "):
+                from dev.config import Settings
+                from dev.harness.session import SessionStore
+                source = value.partition(" ")[2].partition(" ")[2].strip()
+                try:
+                    self.session_id = SessionStore(Settings.load().session_db).import_session(source)
+                    self.query_one("#chat-view", RichLog).write(f"Imported session: {self.session_id}")
+                except (OSError, TypeError, ValueError, KeyError) as exc:
+                    self.query_one("#chat-view", RichLog).write(f"Import failed: {exc}")
             else:
                 self.query_one("#chat-view", RichLog).write(f"> {value}")
                 self.run_worker(self._ask(value), exclusive=False)
@@ -106,10 +140,14 @@ if App is not object:
                 def approval_handler(request: ApprovalRequest) -> ApprovalDecision:
                     return ask_approval(request.action, request.target, request.reason)
                 def event_sink(event):
-                    self.call_from_thread(self.query_one("#status-bar", Static).update, f"agent: {event.get('agent', event.get('type', 'running'))}")
+                    if event.get("type") == "token":
+                        self.call_from_thread(self.query_one("#chat-view", RichLog).write, event.get("text", ""))
+                    else:
+                        self.call_from_thread(self.query_one("#status-bar", Static).update, f"agent: {event.get('agent', event.get('type', 'running'))}")
                 initial = {"task": cleaned, "messages": previous["state"].get("messages", []) if previous else [],
                            "events": previous["state"].get("events", []) if previous else [],
-                           "iteration": previous["state"].get("iteration", 0) if previous else 0}
+                           "iteration": previous["state"].get("iteration", 0) if previous else 0,
+                           "requested_agent": self._requested_agent}
                 result = await build_supervisor_graph(settings, ApprovalManager(approval_handler), [str(path) for path in files],
                                                       cancellation=self._cancellation, event_sink=event_sink,
                                                       session_id=self.session_id).ainvoke(initial)

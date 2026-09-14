@@ -34,6 +34,9 @@ class Settings:
     test_command: str = ""
     max_file_bytes: int = 1_000_000
     embeddings_enabled: bool = False
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_cache_dir: Path = field(default_factory=lambda: Path.home() / ".cache" / "dev" / "embeddings")
+    embeddings_offline: bool = False
     tracing_enabled: bool = False
 
     @classmethod
@@ -58,6 +61,9 @@ class Settings:
             test_command=get("DEV_TEST_COMMAND", ""),
             max_file_bytes=int(get("DEV_MAX_FILE_BYTES", "1000000")),
             embeddings_enabled=boolean("DEV_EMBEDDINGS_ENABLED", False),
+            embedding_model=get("DEV_EMBEDDING_MODEL", cls.embedding_model),
+            embedding_cache_dir=Path(get("DEV_EMBEDDING_CACHE_DIR", str(Path.home() / ".cache" / "dev" / "embeddings"))).expanduser(),
+            embeddings_offline=boolean("DEV_EMBEDDINGS_OFFLINE", False),
             tracing_enabled=boolean("LANGSMITH_TRACING", False),
         )
 

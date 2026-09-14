@@ -9,13 +9,15 @@ place.
 
 Current local validation:
 
-- 16 automated tests passing.
+- 25 automated tests are defined; the suite includes session import/export,
+  versioning, and framework-detection coverage.
 - Ruff and Python compilation passing.
 - Textual pilot tests passing.
 - LangChain provider-contract and tool-calling smoke tests passing.
 - LangGraph SQLite checkpoint construction passing.
 - Wheel build and isolated installation passing.
 - Declared dependency audit passing.
+- Bandit static security scanning is now part of CI.
 
 ## Release 0.1.0 gate
 
@@ -46,7 +48,7 @@ Current local validation:
 - Add richer LangGraph interrupt/resume tests across process restarts.
 - Add complete approval-history persistence and approval replay rules.
 - Add process-tree and cancellation tests on every supported OS.
-- Improve test-framework detection with package-manager and virtual-environment
+- Expand test-framework detection with virtual-environment and project-policy
   awareness.
 - Add configurable test selection and per-project test policies.
 - Add conflict-resolution UX when files change during an agent run.
@@ -54,9 +56,12 @@ Current local validation:
 ### User experience
 
 - Add richer diff previews with file-by-file accept/reject decisions.
-- Add streamed model/tool output to the conversation view.
-- Add session rename, delete, export, and import commands to the TUI.
-- Add `/agent` selection that changes the active specialist or model policy.
+- Expand streamed model/tool output coverage and rendering quality in the
+  conversation view.
+- Add comprehensive tests and safer UX around the TUI session rename, delete,
+  export, and import commands.
+- Make `/agent` selection route to distinct specialist prompts or model
+  policies rather than only selecting a requested perspective.
 - Add machine-readable event streaming for CLI automation.
 
 ## Post-release 0.3.0
@@ -101,4 +106,3 @@ The project is ready for a public release when:
 5. Dependency and security scans have no unresolved release-blocking findings.
 6. The final wheel, source distribution, documentation, and changelog are
    consistent with the tagged version.
-

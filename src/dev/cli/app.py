@@ -60,8 +60,10 @@ if typer:
             print(f"{item['id'][:8]}  {item['name']}  {item['updated_at']}")
 
     @app.command("session")
-    def session_command(action: str = typer.Argument(..., help="list, events, or delete"), identifier: str | None = typer.Argument(None)):
-        """Inspect or remove a saved session."""
+    def session_command(action: str = typer.Argument(..., help="list, events, delete, rename, export, or import"),
+                        identifier: str | None = typer.Argument(None),
+                        value: str | None = typer.Argument(None)):
+        """Inspect, modify, export, or import a saved session."""
         store = SessionStore(Settings.load().session_db)
         if action == "list":
             for item in store.list_sessions():
@@ -72,8 +74,21 @@ if typer:
         elif action == "delete" and identifier:
             if not store.delete(identifier):
                 raise typer.BadParameter(f"Session not found: {identifier}")
+        elif action == "rename" and identifier and value:
+            if not store.rename(identifier, value):
+                raise typer.BadParameter(f"Session not found: {identifier}")
+        elif action == "export" and identifier and value:
+            try:
+                typer.echo(store.export_session(identifier, value))
+            except (KeyError, OSError) as exc:
+                raise typer.BadParameter(str(exc)) from exc
+        elif action == "import" and identifier:
+            try:
+                typer.echo(store.import_session(identifier, value))
+            except (OSError, TypeError, ValueError) as exc:
+                raise typer.BadParameter(str(exc)) from exc
         else:
-            raise typer.BadParameter("Use: dev session list|events ID|delete ID")
+            raise typer.BadParameter("Use: dev session list|events ID|delete ID|rename ID NAME|export ID PATH|import PATH [NAME]")
 
     @app.command()
     def doctor():

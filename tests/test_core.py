@@ -89,6 +89,19 @@ def test_sessions_round_trip(tmp_path: Path):
     assert store.list_sessions()[0]["name"] == "demo"
 
 
+def test_sessions_can_rename_export_and_import(tmp_path: Path):
+    store = SessionStore(tmp_path / "sessions.db")
+    sid = store.save(None, "demo", {"task": "hello"})
+    store.append_event(sid, "run-1", {"type": "completed"})
+    assert store.rename(sid, "renamed")
+    export_path = store.export_session("renamed", tmp_path / "session.json")
+
+    imported = SessionStore(tmp_path / "imported.db").import_session(export_path, "copy")
+    imported_store = SessionStore(tmp_path / "imported.db")
+    assert imported_store.load(imported)["name"] == "copy"
+    assert imported_store.events(imported)[0]["event"] == {"type": "completed"}
+
+
 def test_graph_has_bounded_result():
     result = build_dev_graph(max_iterations=1).invoke({"task": "test"})
     assert result["status"] == "completed"

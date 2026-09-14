@@ -123,7 +123,7 @@ pip install -e ".[agent,anthropic,google,embeddings,tracing,dev]"
 | `anthropic` | langchain-anthropic | Anthropic provider |
 | `google` | langchain-google-genai | Google provider |
 | `azure` | langchain-openai | Azure OpenAI provider |
-| `embeddings` | numpy, onnxruntime, transformers, sentence-transformers | Local ONNX embeddings |
+| `embeddings` | numpy, onnxruntime, transformers, sentence-transformers | Optional local embeddings |
 | `tracing` | langsmith | LangSmith tracing |
 | `dev` | pytest, pytest-cov, ruff, pyright | Development tools |
 | `all` | all of the above | Full installation |
@@ -152,6 +152,9 @@ pip install -e ".[agent,anthropic,google,embeddings,tracing,dev]"
 | `DEV_TEST_COMMAND` | `""` (auto-detect) | Custom test command for tester agent |
 | `DEV_MAX_FILE_BYTES` | `1000000` | Maximum file size to read (bytes) |
 | `DEV_EMBEDDINGS_ENABLED` | `false` | Enable local ONNX embeddings for token optimization |
+| `DEV_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Local embedding model identifier |
+| `DEV_EMBEDDING_CACHE_DIR` | `~/.cache/dev/embeddings` | Local embedding model cache directory |
+| `DEV_EMBEDDINGS_OFFLINE` | `false` | Prevent embedding model downloads and use cached files only |
 | `LANGSMITH_TRACING` | `false` | Enable LangSmith tracing |
 
 ### Example `~/.dev/config.env`
@@ -238,6 +241,9 @@ List all sessions.
 
 ```bash
 dev sessions
+dev session rename local-dev renamed-session
+dev session export local-dev ./local-dev-session.json
+dev session import ./local-dev-session.json imported-session
 ```
 
 ### `dev session list`

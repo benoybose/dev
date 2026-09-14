@@ -4,6 +4,11 @@
 
 `dev` is a locally installed AI coding agent that works with any OpenAI-compatible inference API (including tool calling). It uses **LangChain** and **LangGraph** for the agentic harness, **Textual** for the terminal UI, **Typer** for the CLI entrypoint, and local embeddings for client-side token optimization. Users reference files and directories with `@` mentions and control sessions and agents with a minimal set of slash commands.
 
+This document is both an architectural target and an implementation guide.
+The production path currently uses a planner → coder → tester LangGraph with a
+bounded tester-to-coder repair loop. Features explicitly marked in the roadmap
+as post-release remain planned extensions rather than guaranteed behavior.
+
 ---
 
 ## 1. Architecture Overview
@@ -58,7 +63,9 @@
 
 **LangGraph over a simple AgentExecutor**: Coding tasks require multi-step state management (read file → analyze → edit → test → fix). LangGraph provides an explicit state machine with conditional branching, loops, and interrupt/resume. Multi-agent patterns (Supervisor / Swarm) are production-proven.
 
-**Local embeddings for token optimization**: Quantized INT8 models like `intelli-embed-v2` run on CPU at roughly 10ms per embedding and achieve ~98% of Azure text-embedding-3-small quality. The key advantage: **zero API calls** — embedding computation consumes no inference tokens.
+**Local embeddings for token optimization**: The current optional wrapper uses
+`sentence-transformers/all-MiniLM-L6-v2` on CPU. The key advantage is **zero
+API calls** — embedding computation consumes no inference tokens.
 
 ---
 
@@ -218,6 +225,12 @@ def route_from_supervisor(state: DevState) -> Literal[
 ```
 
 **Performance trade-off**: The supervisor pattern adds one extra model call (results must be summarized by the supervisor) compared to a simple single-agent setup, but it provides centralized control. For a coding agent, that overhead is worth it because the supervisor maintains a global view of files.
+
+**Current implementation note**: The durable graph currently implements the
+planner, coder, and tester stages directly. Failed tests can route back to the
+coder for at most two repairs, subject to the configured iteration budget.
+The `doc_writer` and fully LLM-routed supervisor shown above remain extension
+points.
 
 ### 4.3 Session Handling and Concurrent Agents
 
@@ -424,6 +437,10 @@ def parse_file_mentions(text: str) -> tuple[str, list[Path]]:
 **Core idea**: Before sending anything to the inference API, local embeddings serve two purposes: (1) semantic caching of repeated queries, and (2) intelligent selection of relevant file context.
 
 **Local embedding configuration**:
+
+The current implementation supports an explicit model cache and offline mode
+through `DEV_EMBEDDING_CACHE_DIR` and `DEV_EMBEDDINGS_OFFLINE`. The ONNX
+implementation below is a future optimization variant.
 
 ```python
 # token_optim/embeddings.py
@@ -639,7 +656,7 @@ dev sessions
 | Agent orchestration | LangGraph Supervisor | Coding tasks require centralized file-state management; production-proven |
 | TUI framework | Textual | Async worker model fits long-running agents; rich layout system |
 | CLI framework | Typer | Clean command registration; automatic help text |
-| Local embeddings | intelli-embed-v2 (ONNX INT8) | ~10ms per embedding on CPU; zero API calls; ~98% of Azure quality |
+| Local embeddings | sentence-transformers/all-MiniLM-L6-v2 | CPU-local, optional, cacheable, and zero API calls |
 | Model interface | ChatOpenAI with base_url | Any OpenAI-compatible endpoint; 100+ providers via LiteLLM |
 | `@` completion | prompt_toolkit Completer | Mature fuzzy matching; avoid the `@staticmethod` crash pitfall |
 | Session storage | SQLite | Zero configuration; supports concurrent sessions; easy to query |
@@ -649,7 +666,7 @@ dev sessions
 ## 7. Extension Directions
 
 1. **Git integration**: Agent automatically diffs and commits after edits; `@diff` mention for review.
-2. **Test-runner agent**: Automatically runs pytest after code edits and triggers a fix loop on failure.
+2. **Richer test-runner agent**: Expand the bounded repair loop with project-specific diagnostics and policies.
 3. **Project memory**: Embed `AGENTS.md` and code conventions into a local vector store; the agent auto-loads relevant memory at startup.
 4. **Sandboxed execution**: For untrusted generated code, run tests in a subprocess with restricted filesystem write access.
 5. **Streaming tool calls**: Stream tool-call deltas to the TUI for a more responsive feel on long edits.

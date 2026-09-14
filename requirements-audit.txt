@@ -7,5 +7,6 @@ langchain-google-genai>=2.0
 langgraph-checkpoint-sqlite>=2.0
 textual>=0.70
 typer>=0.12
+prompt-toolkit>=3.0
 langsmith>=0.2
 sentence-transformers>=3.0
