@@ -395,8 +395,15 @@ The TUI supports provider configuration without placing secrets in the
 conversation history:
 
 ```text
+/provider
+/provider 2
+/provider openrouter
 /provider list
 /provider use openrouter
+/model
+/model free
+/model tools
+/model 1
 /model list
 /model use poolside/laguna-s-2.1:free
 /api-key set
@@ -404,8 +411,11 @@ conversation history:
 /config reload
 ```
 
-`/model list` queries the active OpenAI-compatible provider's `/models`
-endpoint. `/api-key set` opens a masked input and stores the key in the
+`/provider` and `/model` show numbered choices, so the common flow is simply
+`/provider`, `/provider 2`, `/model free`, and `/model 1`. Model lists can be
+filtered with `free`, `tools`, or any text fragment. The active
+OpenAI-compatible provider's `/models` endpoint is queried for model choices.
+`/api-key set` opens a masked input and stores the key in the
 user-wide configuration file. `/config show` masks the configured key. New
 agent runs use the updated settings; an active run is not interrupted.
 

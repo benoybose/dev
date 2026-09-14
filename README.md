@@ -260,8 +260,15 @@ dev tui
 Inside the TUI, provider and model settings can be managed with:
 
 ```text
+/provider                    # show numbered providers
+/provider 2                  # select a provider by number
+/provider openrouter         # select by name
 /provider list
 /provider use openrouter
+/model                       # show numbered models
+/model free                  # show only free models
+/model tools                 # show tool-capable models
+/model 1                     # select a displayed model
 /model list
 /model use poolside/laguna-s-2.1:free
 /api-key set

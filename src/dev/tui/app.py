@@ -47,6 +47,11 @@ if App is not object:
                 self.done(value)
             self.dismiss()
 
+        def on_input_submitted(self, event: Input.Submitted) -> None:
+            if event.input.id == "secret-input":
+                self.done(event.value)
+                self.dismiss()
+
     class DevTUI(App):
         CSS_PATH = None
 
@@ -55,12 +60,95 @@ if App is not object:
             self.session_id = session_id or "default"
             self._cancellation = None
             self._requested_agent = "supervisor"
+            self._provider_choices: list[str] = []
+            self._model_choices: list[str] = []
 
         def compose(self) -> ComposeResult:
             with Vertical():
                 yield RichLog(id="chat-view", wrap=True)
                 yield Input(placeholder="Enter a task... use @ to reference files", id="input-bar")
                 yield Static("agent: idle", id="status-bar")
+
+        def _write(self, message: str) -> None:
+            self.query_one("#chat-view", RichLog).write(message)
+
+        def _show_providers(self) -> None:
+            from dev.configuration import PROVIDERS
+
+            self._provider_choices = sorted(PROVIDERS)
+            lines = ["Providers (use /provider <number> or /provider <name>):"]
+            lines.extend(f"{index}. {name}" for index, name in enumerate(self._provider_choices, 1))
+            self._write("\n".join(lines))
+
+        def _select_provider(self, value: str) -> None:
+            from dev.configuration import PROVIDERS, ConfigurationError, UserConfig
+
+            value = value.strip()
+            if value.isdigit():
+                if not self._provider_choices:
+                    self._provider_choices = sorted(PROVIDERS)
+                index = int(value)
+                if not 0 < index <= len(self._provider_choices):
+                    self._write("Choose a provider number from the latest /provider list.")
+                    return
+                value = self._provider_choices[index - 1]
+            try:
+                UserConfig().set_provider(value)
+                self._write(f"Provider saved: {value}. New runs will use it.")
+            except ConfigurationError as exc:
+                self._write(str(exc))
+
+        def _show_models(self, filter_text: str = "") -> None:
+            from dev.config import Settings
+            from dev.configuration import ConfigurationError, list_models
+
+            settings = Settings.load()
+            try:
+                models = list_models(settings.base_url, settings.api_key)
+            except ConfigurationError as exc:
+                self._write(str(exc))
+                return
+            query = filter_text.strip().lower()
+            if query == "free":
+                models = [item for item in models if item.free]
+            elif query == "tools":
+                models = [item for item in models if item.tool_calling]
+            elif query:
+                models = [item for item in models if query in item.identifier.lower()]
+            self._model_choices = [item.identifier for item in models[:50]]
+            if not self._model_choices:
+                self._write("No matching models returned by the active provider.")
+                return
+            heading = "Models (use /model <number> or /model use <id>)"
+            if query:
+                heading += f" — filter: {filter_text}"
+            lines = [heading]
+            lines.extend(
+                f"{index}. {item.identifier}"
+                + (" [free]" if item.free else "")
+                + (" [tools]" if item.tool_calling else "")
+                for index, item in enumerate(models[:50], 1)
+            )
+            self._write("\n".join(lines))
+
+        def _select_model(self, value: str) -> None:
+            from dev.configuration import ConfigurationError, UserConfig
+
+            value = value.strip()
+            if value.isdigit():
+                index = int(value)
+                if not 0 < index <= len(self._model_choices):
+                    self._write("Choose a model number from the latest /model list.")
+                    return
+                value = self._model_choices[index - 1]
+            if not value:
+                self._write("Enter a model name or run /model first.")
+                return
+            try:
+                UserConfig().set_model(value)
+                self._write(f"Model saved: {value}. New runs will use it.")
+            except ConfigurationError as exc:
+                self._write(str(exc))
 
         def on_input_submitted(self, event: Input.Submitted) -> None:
             value = event.value.strip()
@@ -70,42 +158,23 @@ if App is not object:
             elif value == "/clear":
                 self.query_one("#chat-view", RichLog).clear()
             elif value == "/help":
-                self.query_one("#chat-view", RichLog).write("/help /provider /model /api-key /config /session /agent /clear /rollback /cancel /exit")
-            elif value == "/provider list":
-                from dev.configuration import PROVIDERS
-                names = ", ".join(sorted(PROVIDERS))
-                self.query_one("#chat-view", RichLog).write("Providers: " + names)
+                self._write("/provider [list|<number>|<name>] /model [list|free|tools|<filter>|<number>|<id>] /api-key set /config show /config reload /session /agent /clear /rollback /cancel /exit")
+            elif value == "/provider" or value == "/provider list":
+                self._show_providers()
             elif value.startswith("/provider use "):
-                from dev.configuration import ConfigurationError, UserConfig
-                provider = value.partition(" ")[2].partition(" ")[2].strip()
-                try:
-                    UserConfig().set_provider(provider)
-                    self.query_one("#chat-view", RichLog).write(f"Provider saved: {provider}. New runs will use it.")
-                except ConfigurationError as exc:
-                    self.query_one("#chat-view", RichLog).write(str(exc))
-            elif value == "/model list":
-                from dev.config import Settings
-                from dev.configuration import ConfigurationError, list_models
-                settings = Settings.load()
-                try:
-                    models = list_models(settings.base_url, settings.api_key)
-                    if not models:
-                        self.query_one("#chat-view", RichLog).write("No models returned by the provider.")
-                    else:
-                        lines = [f"{item.identifier}"
-                                 + (" [free]" if item.free else "")
-                                 + (" [tools]" if item.tool_calling else "") for item in models[:100]]
-                        self.query_one("#chat-view", RichLog).write("\n".join(lines))
-                except ConfigurationError as exc:
-                    self.query_one("#chat-view", RichLog).write(str(exc))
+                self._select_provider(value.partition(" ")[2].partition(" ")[2])
+            elif value.startswith("/provider "):
+                self._select_provider(value.partition(" ")[2])
+            elif value == "/model" or value == "/model list":
+                self._show_models()
             elif value.startswith("/model use "):
-                from dev.configuration import ConfigurationError, UserConfig
-                model = value.partition(" ")[2].partition(" ")[2].strip()
-                try:
-                    UserConfig().set_model(model)
-                    self.query_one("#chat-view", RichLog).write(f"Model saved: {model}. New runs will use it.")
-                except ConfigurationError as exc:
-                    self.query_one("#chat-view", RichLog).write(str(exc))
+                self._select_model(value.partition(" ")[2].partition(" ")[2])
+            elif value.startswith("/model "):
+                model_value = value.partition(" ")[2]
+                if model_value.isdigit():
+                    self._select_model(model_value)
+                else:
+                    self._show_models(model_value)
             elif value == "/api-key set":
                 from dev.configuration import ConfigurationError, UserConfig
                 def save_key(api_key: str) -> None:
