@@ -4,6 +4,7 @@ langchain-core==1.6.3
 langchain-openai==1.6.2
 langgraph==1.2.11
 langgraph-checkpoint-sqlite==3.1.1
+aiosqlite==0.22.1
 langsmith==0.12.4
 openai==3.13.0
 textual==8.2.8

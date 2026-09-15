@@ -33,8 +33,9 @@ class GraphState(TypedDict, total=False):
 
 class ConfiguredGraph:
     """Small adapter that supplies a stable LangGraph checkpoint thread ID."""
-    def __init__(self, graph: Any, thread_id: str):
+    def __init__(self, graph: Any, thread_id: str, graph_builder: Any = None, session_db: Any = None):
         self.graph, self.thread_id = graph, thread_id
+        self.graph_builder, self.session_db = graph_builder, session_db
 
     def _config(self, config: dict[str, Any] | None = None) -> dict[str, Any]:
         merged = dict(config or {})
@@ -47,7 +48,20 @@ class ConfiguredGraph:
         return self.graph.invoke(state, config=self._config(config))
 
     async def ainvoke(self, state: GraphState, config: dict[str, Any] | None = None) -> dict[str, Any]:
-        return await self.graph.ainvoke(state, config=self._config(config))
+        if self.graph_builder is None or self.session_db is None:
+            return await self.graph.ainvoke(state, config=self._config(config))
+        try:
+            import aiosqlite
+            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+        except ImportError as exc:
+            raise ImportError(
+                "Async LangGraph runs require aiosqlite. Install the agent extra "
+                "or run: pip install aiosqlite"
+            ) from exc
+        async with aiosqlite.connect(str(self.session_db)) as connection:
+            checkpointer = AsyncSqliteSaver(connection)
+            async_graph = self.graph_builder.compile(checkpointer=checkpointer)
+            return await async_graph.ainvoke(state, config=self._config(config))
 
 
 def build_langgraph_supervisor(settings: Any, approvals: ApprovalManager, files: list[str] | None = None,
@@ -194,6 +208,11 @@ def build_langgraph_supervisor(settings: Any, approvals: ApprovalManager, files:
 
         from langgraph.checkpoint.sqlite import SqliteSaver
         connection = sqlite3.connect(settings.session_db, check_same_thread=False)
-        return ConfiguredGraph(graph.compile(checkpointer=SqliteSaver(connection)), session_id or run_id)
+        return ConfiguredGraph(
+            graph.compile(checkpointer=SqliteSaver(connection)),
+            session_id or run_id,
+            graph,
+            settings.session_db,
+        )
     except (ImportError, TypeError):
         return ConfiguredGraph(graph.compile(), session_id or run_id)
