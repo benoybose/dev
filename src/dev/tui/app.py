@@ -79,24 +79,35 @@ if App is not object:
                 self.dismiss()
 
     class ProviderSetupModal(ModalScreen):
-        def __init__(self, settings, done):
+        def __init__(self, settings, done, *, first_time: bool = True):
             super().__init__()
             self.settings = settings
             self.done = done
+            self.first_time = first_time
 
         def compose(self) -> ComposeResult:
-            from dev.configuration import PROVIDERS
+            from dev.configuration import PROVIDERS, catalog_models
 
             options = [(name.title(), name) for name in sorted(PROVIDERS)]
             provider = self.settings.provider if self.settings.provider in PROVIDERS else "openrouter"
+            models = catalog_models(provider)
+            model_options = self._model_options(models)
+            selected_model = self.settings.model if self.settings.model in {item.identifier for item in models} else (
+                models[0].identifier if models else Select.BLANK
+            )
             with Vertical(id="setup-dialog"):
-                yield Label("First-time provider setup", id="setup-title")
-                yield Label("Configure a provider before starting your first agent run.", id="setup-help")
+                title = "First-time provider setup" if self.first_time else "Provider and model setup"
+                help_text = (
+                    "Configure a provider before starting your first agent run."
+                    if self.first_time else "Choose a provider and coding model for future agent runs."
+                )
+                yield Label(title, id="setup-title")
+                yield Label(help_text, id="setup-help")
                 yield Select(options, value=provider, prompt="Provider", id="setup-provider")
                 yield Input(value="" if self.settings.api_key == "sk-placeholder" else self.settings.api_key,
                             placeholder="API key (not required for Ollama)", password=True, id="setup-api-key")
                 yield Input(value=self.settings.base_url, placeholder="Base URL", id="setup-base-url")
-                yield Input(value=self.settings.model, placeholder="Model identifier", id="setup-model")
+                yield Select(model_options, value=selected_model, prompt="Coding model", id="setup-model")
                 yield Label("", id="setup-error")
                 with Horizontal(id="setup-actions"):
                     yield Button("Save and continue", id="setup-save")
@@ -105,13 +116,33 @@ if App is not object:
         def on_mount(self) -> None:
             self.query_one("#setup-provider", Select).focus()
 
+        def on_key(self, event) -> None:
+            if event.key == "escape":
+                event.stop()
+                self.dismiss()
+
         def on_select_changed(self, event: Select.Changed) -> None:
             from dev.configuration import PROVIDERS
 
+            if event.select.id != "setup-provider":
+                return
             provider = str(event.value)
             base_url = PROVIDERS.get(provider, {}).get("base_url", "")
             if base_url:
                 self.query_one("#setup-base-url", Input).value = base_url
+            from dev.configuration import catalog_models
+            models = catalog_models(provider)
+            model_select = self.query_one("#setup-model", Select)
+            model_select.set_options(self._model_options(models))
+            model_select.value = models[0].identifier if models else Select.BLANK
+
+        @staticmethod
+        def _model_options(models) -> list[tuple[str, str]]:
+            return [
+                (f"{item.identifier}{' [free]' if item.free else ''}", item.identifier)
+                for item in models
+                if item.agent_ready
+            ]
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
             if event.button.id == "setup-exit":
@@ -124,7 +155,8 @@ if App is not object:
             provider = str(self.query_one("#setup-provider", Select).value)
             api_key = self.query_one("#setup-api-key", Input).value.strip()
             base_url = self.query_one("#setup-base-url", Input).value.strip()
-            model = self.query_one("#setup-model", Input).value.strip()
+            model_value = self.query_one("#setup-model", Select).value
+            model = "" if model_value in {None, Select.BLANK} else str(model_value).strip()
             if provider == str(Select.BLANK):
                 self.query_one("#setup-error", Label).update("Select a provider.")
                 return
@@ -276,7 +308,8 @@ if App is not object:
             align: center middle;
         }
         #setup-actions Button {
-            margin: 0 1;
+            margin: 1 1;
+            padding: 1 2;
         }
         #setup-save {
             background: #3a3a3a;
@@ -328,6 +361,7 @@ if App is not object:
                 with Horizontal(id="status-bar"):
                     yield Static("● ready", id="status-text", classes="status-item")
                     yield Static(f"session: {self.session_id}", id="session-text", classes="status-item")
+                    yield Static("hint: /help • /setup • /model", id="hint-text", classes="status-item")
                 yield Footer()
 
         def on_mount(self) -> None:
@@ -347,11 +381,81 @@ if App is not object:
             self.query_one("#input-bar", Input).focus()
             self._write("Ready. Type a task or /help for commands.")
 
-        def action_show_help(self) -> None:
+        def _open_setup(self) -> None:
+            from dev.config import Settings
+
+            self.push_screen(ProviderSetupModal(Settings.load(), self._finish_reconfiguration, first_time=False))
+
+        def _finish_reconfiguration(self) -> None:
+            from dev.config import Settings
+
+            settings = Settings.load()
+            self._write(f"Configuration saved: {settings.provider} / {settings.model}")
+            self.query_one("#input-bar", Input).focus()
+
+        def action_show_help(self, topic: str = "") -> None:
+            topic = topic.strip().lower()
+            help_topics = {
+                "setup": (
+                    "SETUP\n"
+                    "/setup or /configure  Open provider, API key, base URL, and coding-model setup.\n"
+                    "/api-key set           Change only the masked API key."
+                ),
+                "provider": (
+                    "PROVIDER\n"
+                    "/provider              List configured providers.\n"
+                    "/provider <number>     Select a listed provider.\n"
+                    "/provider use <name>   Select a provider by name.\n"
+                    "Use /setup when changing provider and model together."
+                ),
+                "model": (
+                    "MODEL\n"
+                    "/model                 Show curated coding models.\n"
+                    "/model <number>        Select a listed curated model.\n"
+                    "/model live             Discover models from the provider API.\n"
+                    "/model live tools      Show live tool-capable models.\n"
+                    "/model use <id>         Select a model by identifier."
+                ),
+                "session": (
+                    "SESSION\n"
+                    "/session                List saved sessions.\n"
+                    "/session use <id>       Switch and restore a saved session.\n"
+                    "/session rename <name>  Rename the current session.\n"
+                    "/session export <path>  Export the current session.\n"
+                    "/session import <path>  Import a session."
+                ),
+                "shortcuts": (
+                    "SHORTCUTS\n"
+                    "F1                     Show this help.\n"
+                    "Ctrl+L                 Clear the transcript.\n"
+                    "F2 / Ctrl+Insert       Copy selected or full transcript.\n"
+                    "Ctrl+C                 Copy a selection or cancel a run.\n"
+                    "Right arrow             Accept an autocomplete suggestion."
+                ),
+            }
+            if topic in {"commands", "command", "all"}:
+                topic = ""
+            if topic:
+                self._write(help_topics.get(topic, f"No help topic: {topic}. Try /help."))
+                return
             self._write(
-                "Commands: /help /provider /model /api-key set /config show "
-                "/session /agent /copy /clear /rollback /cancel /exit\n"
-                "Shortcuts: F1 help • Ctrl+L clear • F2/Ctrl+Insert copy • Ctrl+C copy selection or cancel"
+                "QUICK START\n"
+                "Describe a task in the prompt. Mention files with @path.\n"
+                "First run: /setup    Change settings later: /setup\n"
+                "\n"
+                "COMMANDS\n"
+                "/help [topic]         Show help or: setup, provider, model, session, shortcuts.\n"
+                "/setup                 Configure provider and coding model.\n"
+                "/provider              List or select a provider.\n"
+                "/model                 Select a curated coding model.\n"
+                "/session               List or switch saved sessions.\n"
+                "/agent [name]          Choose supervisor, planner, coder, or tester.\n"
+                "/config show           Show active settings with the API key masked.\n"
+                "/copy /clear           Copy the transcript or clear it.\n"
+                "/rollback /cancel      Restore safe changes or cancel a run.\n"
+                "/exit                  Quit the TUI.\n"
+                "\n"
+                "Try /help model or /help shortcuts for details."
             )
 
         def action_clear_chat(self) -> None:
@@ -398,6 +502,34 @@ if App is not object:
             lines = ["Providers (use /provider <number> or /provider <name>):"]
             lines.extend(f"{index}. {name}" for index, name in enumerate(self._provider_choices, 1))
             self._write("\n".join(lines))
+
+        def _switch_session(self, requested: str) -> None:
+            from dev.config import Settings
+            from dev.harness.session import SessionStore
+
+            requested = requested.strip()
+            if not requested:
+                self._write("Usage: /session use <id-or-name>")
+                return
+            try:
+                session = SessionStore(Settings.load().session_db).load(requested)
+            except OSError as exc:
+                self._write(f"Unable to load session: {exc}")
+                return
+            if not session:
+                self._write(f"Session not found: {requested}")
+                return
+            self.session_id = session["id"]
+            messages = session.get("state", {}).get("messages", [])
+            self._transcript = [
+                f"{message.get('role', 'agent')}: {message['content']}"
+                for message in messages
+                if isinstance(message, dict) and isinstance(message.get("content"), str)
+            ]
+            panel = self.query_one("#chat-view", TextArea)
+            panel.text = "\n".join(self._transcript)
+            self.query_one("#session-text", Static).update(f"session: {self.session_id}")
+            self._write(f"Switched to session: {session['name']}")
 
         def _select_provider(self, value: str) -> None:
             from dev.configuration import PROVIDERS, ConfigurationError, UserConfig
@@ -450,6 +582,33 @@ if App is not object:
             )
             self._write("\n".join(lines))
 
+        def _show_catalog(self, filter_text: str = "") -> None:
+            from dev.config import Settings
+            from dev.configuration import catalog_models
+
+            settings = Settings.load()
+            query = filter_text.strip().lower()
+            models = catalog_models(settings.provider)
+            if query:
+                models = [item for item in models if query in item.identifier.lower()]
+            self._model_choices = [item.identifier for item in models]
+            if not self._model_choices:
+                self._write(f"No curated coding models found for provider: {settings.provider}.")
+                return
+            lines = [
+                (
+                    f"Curated coding models for {settings.provider} "
+                    "(use /model <number> or /model use <id>):"
+                )
+            ]
+            lines.extend(
+                f"{index}. {item.identifier}"
+                + (" [free]" if item.free else "")
+                + " [tools, coding]"
+                for index, item in enumerate(models, 1)
+            )
+            self._write("\n".join(lines))
+
         def _select_model(self, value: str) -> None:
             from dev.configuration import ConfigurationError, UserConfig
 
@@ -472,12 +631,18 @@ if App is not object:
         def on_input_submitted(self, event: Input.Submitted) -> None:
             value = event.value.strip()
             event.input.value = ""
+            if not value:
+                return
             if value == "/exit":
                 self.exit()
+            elif value in {"/setup", "/configure"}:
+                self._open_setup()
             elif value == "/clear":
                 self.action_clear_chat()
             elif value == "/help":
                 self.action_show_help()
+            elif value.startswith("/help "):
+                self.action_show_help(value.partition(" ")[2])
             elif value == "/copy":
                 self.action_copy_transcript()
             elif value == "/provider" or value == "/provider list":
@@ -486,8 +651,14 @@ if App is not object:
                 self._select_provider(value.partition(" ")[2].partition(" ")[2])
             elif value.startswith("/provider "):
                 self._select_provider(value.partition(" ")[2])
-            elif value == "/model" or value == "/model list":
+            elif value == "/model" or value in {"/model catalog", "/model list"}:
+                self._show_catalog()
+            elif value.startswith("/model catalog "):
+                self._show_catalog(value.partition(" ")[2].partition(" ")[2])
+            elif value == "/model live":
                 self._show_models()
+            elif value.startswith("/model live "):
+                self._show_models(value.partition(" ")[2].partition(" ")[2])
             elif value.startswith("/model use "):
                 self._select_model(value.partition(" ")[2].partition(" ")[2])
             elif value.startswith("/model "):
@@ -515,16 +686,21 @@ if App is not object:
             elif value == "/config reload":
                 from dev.config import Settings
                 settings = Settings.load()
-                self._write(f"Configuration reloaded: {settings.provider} / {settings.model}")
+                self._workspace = settings.workspace
+                self._write(f"Configuration reloaded for future runs: {settings.provider} / {settings.model}")
             elif value == "/session":
                 from dev.config import Settings
                 from dev.harness.session import SessionStore
-                sessions = SessionStore(Settings.load().session_db).list_sessions()
-                self._write("\n".join(f"{item['id'][:8]}  {item['name']}" for item in sessions) or "No saved sessions.")
+                try:
+                    sessions = SessionStore(Settings.load().session_db).list_sessions()
+                    self._write("\n".join(f"{item['id']}  {item['name']}" for item in sessions) or "No saved sessions.")
+                except OSError as exc:
+                    self._write(f"Unable to list sessions: {exc}")
+            elif value.startswith("/session use "):
+                self._switch_session(value.partition(" ")[2].partition(" ")[2])
             elif (value.startswith("/session ") and not value.startswith("/session rename ")
                   and not value.startswith("/session export ") and not value.startswith("/session import ")):
-                self.session_id = value.partition(" ")[2].strip()
-                self._write(f"Switched to session: {self.session_id}")
+                self._switch_session(value.partition(" ")[2].strip())
             elif value.startswith("/agent"):
                 requested = value.partition(" ")[2].strip() or "supervisor"
                 if requested not in {"supervisor", "planner", "coder", "tester"}:
@@ -539,8 +715,11 @@ if App is not object:
             elif value == "/rollback":
                 from dev.config import Settings
                 from dev.harness.changes import ChangeJournal
-                restored = ChangeJournal(Settings.load().session_db).rollback(self.session_id or "")
-                self._write("Restored: " + ", ".join(restored) if restored else "No safe changes to restore.")
+                try:
+                    restored = ChangeJournal(Settings.load().session_db).rollback(self.session_id or "")
+                    self._write("Restored: " + ", ".join(restored) if restored else "No safe changes to restore.")
+                except (OSError, ValueError) as exc:
+                    self._write(f"Rollback failed: {exc}")
             elif value.startswith("/session rename "):
                 from dev.config import Settings
                 from dev.harness.session import SessionStore
@@ -568,6 +747,8 @@ if App is not object:
                     self._write(f"Imported session: {self.session_id}")
                 except (OSError, TypeError, ValueError, KeyError) as exc:
                     self._write(f"Import failed: {exc}")
+            elif value.startswith("/"):
+                self._write(f"Unknown command: {value.split(maxsplit=1)[0]}. Type /help for commands.")
             else:
                 self._write(f"> {value}")
                 self.run_worker(self._ask(value), exclusive=False)

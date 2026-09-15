@@ -27,6 +27,59 @@ class ModelInfo:
     context_length: int | None = None
     free: bool = False
     tool_calling: bool = False
+    coding: bool = False
+
+    @property
+    def agent_ready(self) -> bool:
+        """Whether the model is curated for coding and tool-enabled agent runs."""
+        return self.tool_calling and self.coding
+
+
+# Conservative, provider-specific defaults for the setup flow. These are
+# intentionally curated for coding agents rather than being an exhaustive
+# list of every model a provider exposes. Provider discovery remains available
+# through the live ``/model`` command.
+MODEL_CATALOG: dict[str, tuple[ModelInfo, ...]] = {
+    "openai": (
+        ModelInfo("gpt-4.1", tool_calling=True, coding=True),
+        ModelInfo("gpt-4.1-mini", tool_calling=True, coding=True),
+        ModelInfo("gpt-4o", tool_calling=True, coding=True),
+        ModelInfo("gpt-4o-mini", tool_calling=True, coding=True),
+        ModelInfo("o3-mini", tool_calling=True, coding=True),
+    ),
+    "openrouter": (
+        ModelInfo("anthropic/claude-3.7-sonnet", tool_calling=True, coding=True),
+        ModelInfo("deepseek/deepseek-chat", tool_calling=True, coding=True),
+        ModelInfo("openai/gpt-4o", tool_calling=True, coding=True),
+        ModelInfo("poolside/laguna-s-2.1:free", free=True, tool_calling=True, coding=True),
+        ModelInfo("qwen/qwen-2.5-coder-32b-instruct", tool_calling=True, coding=True),
+    ),
+    "anthropic": (
+        ModelInfo("claude-3-5-sonnet-latest", tool_calling=True, coding=True),
+        ModelInfo("claude-3-7-sonnet-latest", tool_calling=True, coding=True),
+        ModelInfo("claude-sonnet-4-20250514", tool_calling=True, coding=True),
+    ),
+    "google": (
+        ModelInfo("gemini-2.0-flash", tool_calling=True, coding=True),
+        ModelInfo("gemini-2.5-flash", tool_calling=True, coding=True),
+        ModelInfo("gemini-2.5-pro", tool_calling=True, coding=True),
+    ),
+    "azure": (
+        ModelInfo("gpt-4o", tool_calling=True, coding=True),
+        ModelInfo("gpt-4o-mini", tool_calling=True, coding=True),
+        ModelInfo("gpt-4.1", tool_calling=True, coding=True),
+    ),
+    "ollama": (
+        ModelInfo("qwen2.5-coder:7b", tool_calling=True, coding=True),
+        ModelInfo("qwen2.5-coder:14b", tool_calling=True, coding=True),
+        ModelInfo("llama3.1:8b", tool_calling=True, coding=True),
+    ),
+}
+
+
+def catalog_models(provider: str) -> list[ModelInfo]:
+    """Return the curated coding-agent models for a provider."""
+    return list(MODEL_CATALOG.get(provider.lower().strip(), ()))
 
 
 class UserConfig:

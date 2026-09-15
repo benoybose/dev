@@ -4,7 +4,14 @@ from pathlib import Path
 import pytest
 
 from dev import configuration
-from dev.configuration import ConfigurationError, ModelInfo, UserConfig, list_models, mask_secret
+from dev.configuration import (
+    ConfigurationError,
+    ModelInfo,
+    UserConfig,
+    catalog_models,
+    list_models,
+    mask_secret,
+)
 
 
 def test_user_config_updates_values_without_duplicate_keys(tmp_path: Path):
@@ -24,6 +31,14 @@ def test_secret_masking_never_returns_short_or_placeholder_secret():
     assert mask_secret("sk-placeholder") == "<not configured>"
     assert mask_secret("short") == "<configured>"
     assert mask_secret("sk-or-v1-abcdefgh") == "sk-o…efgh"
+
+
+def test_model_catalog_contains_only_agent_ready_models_for_each_provider():
+    for provider in configuration.PROVIDERS:
+        models = catalog_models(provider)
+        assert models
+        assert all(model.agent_ready for model in models)
+        assert len({model.identifier for model in models}) == len(models)
 
 
 def test_list_models_sorts_and_identifies_free_and_tool_models(monkeypatch):

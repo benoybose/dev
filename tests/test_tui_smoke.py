@@ -28,7 +28,7 @@ def test_textual_app_smoke():
             await pilot.press(*list("hello"))
             assert pilot.app.query_one("#input-bar").value == "hello"
             await pilot.press("ctrl+a", "backspace")
-            await pilot.press("h", "e", "l", "p", "enter")
+            await pilot.press(*list("/help"), "enter")
             await pilot.pause()
 
     asyncio.run(run())
@@ -40,6 +40,7 @@ def test_textual_layout_has_chrome_and_keyboard_actions():
             assert pilot.app.query_one("#welcome")
             assert pilot.app.query_one("Header")
             assert pilot.app.query_one("Footer")
+            assert "hint: /help" in str(pilot.app.query_one("#hint-text").render())
             await pilot.press("f1")
             await pilot.press("ctrl+l")
             await pilot.pause()
@@ -58,6 +59,10 @@ def test_unconfigured_provider_opens_setup_gate(monkeypatch):
             assert pilot.app.screen.styles.align == ("center", "middle")
             actions = pilot.app.screen.query_one("#setup-actions")
             assert [button.id for button in actions.query("Button")] == ["setup-save", "setup-exit"]
+            model_select = pilot.app.screen.query_one("#setup-model")
+            assert model_select.value in {
+                item.identifier for item in configuration.catalog_models("openrouter")
+            }
 
     asyncio.run(run())
 
@@ -142,6 +147,36 @@ def test_textual_command_surface_smoke():
                 await pilot.press(*list(command))
                 await pilot.press("enter")
                 await pilot.pause()
+
+    asyncio.run(run())
+
+
+def test_help_command_supports_overview_and_topics():
+    async def run() -> None:
+        async with DevTUI(session_id="help-test").run_test() as pilot:
+            await submit_command(pilot, "/help")
+            assert "QUICK START" in pilot.app._transcript[-1]
+            assert "/help model" in pilot.app._transcript[-1]
+            await submit_command(pilot, "/help model")
+            assert "MODEL" in pilot.app._transcript[-1]
+            assert "/model live tools" in pilot.app._transcript[-1]
+            await submit_command(pilot, "/help unknown")
+            assert pilot.app._transcript[-1] == "No help topic: unknown. Try /help."
+
+    asyncio.run(run())
+
+
+def test_setup_command_reopens_provider_panel_and_unknown_commands_are_safe():
+    async def run() -> None:
+        async with DevTUI(session_id="command-test").run_test() as pilot:
+            await submit_command(pilot, "/setup")
+            assert pilot.app.screen.query_one("#setup-dialog")
+            await pilot.press("escape")
+            await submit_command(pilot, "/not-a-command")
+            assert "Unknown command: /not-a-command" in pilot.app._transcript[-1]
+            before = len(pilot.app._transcript)
+            await pilot.press("enter")
+            assert len(pilot.app._transcript) == before
 
     asyncio.run(run())
 

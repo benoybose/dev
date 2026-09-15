@@ -408,7 +408,13 @@ conversation history:
 /provider openrouter
 /provider list
 /provider use openrouter
+/setup
 /model
+/model catalog
+/model catalog free
+/model live
+/model live free
+/model live tools
 /model free
 /model tools
 /model 1
@@ -419,10 +425,22 @@ conversation history:
 /config reload
 ```
 
-`/provider` and `/model` show numbered choices, so the common flow is simply
-`/provider`, `/provider 2`, `/model free`, and `/model 1`. Model lists can be
-filtered with `free`, `tools`, or any text fragment. The active
-OpenAI-compatible provider's `/models` endpoint is queried for model choices.
+`/provider` shows the configured provider choices. `/model` and `/model catalog`
+show a curated, provider-specific catalogue containing models selected for
+coding and tool/function-calling agent runs. Choose one with `/model 1` or
+`/model use MODEL_ID`; `/model catalog free` filters the curated catalogue.
+The same catalogue is available in the first-time provider setup panel, where
+changing the provider refreshes the model choices automatically.
+
+`/setup` reopens the same provider/model panel at any time. It is the easiest
+way to change provider, API key, base URL, and curated coding model together.
+
+Live discovery remains available with `/model live`, `/model live free`,
+`/model live tools`, or the backwards-compatible `/model free`, `/model tools`,
+and `/model TEXT` forms. These commands query the active OpenAI-compatible provider's
+`/models` endpoint and are useful for experimenting with models outside the
+curated catalogue. Live discovery does not guarantee that every returned model
+supports coding tools, so the curated catalogue is the recommended default.
 `/api-key set` opens a masked input and stores the key in the
 user-wide configuration file. `/config show` masks the configured key. New
 agent runs use the updated settings; an active run is not interrupted.
