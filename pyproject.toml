@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dev-coding-agent"
-version = "0.1.0"
+version = "0.2.0-dev.0"
 description = "A local-first, approval-gated AI coding agent."
 readme = "README.md"
 license = { file = "LICENSE" }
