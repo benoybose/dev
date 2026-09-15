@@ -55,6 +55,9 @@ def test_unconfigured_provider_opens_setup_gate(monkeypatch):
             assert pilot.app.screen.query_one("#setup-dialog")
             assert pilot.app.screen.query_one("#setup-provider")
             assert pilot.app.screen.query_one("#setup-save")
+            assert pilot.app.screen.styles.align == ("center", "middle")
+            actions = pilot.app.screen.query_one("#setup-actions")
+            assert [button.id for button in actions.query("Button")] == ["setup-save", "setup-exit"]
 
     asyncio.run(run())
 

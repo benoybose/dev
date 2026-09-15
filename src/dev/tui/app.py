@@ -98,8 +98,9 @@ if App is not object:
                 yield Input(value=self.settings.base_url, placeholder="Base URL", id="setup-base-url")
                 yield Input(value=self.settings.model, placeholder="Model identifier", id="setup-model")
                 yield Label("", id="setup-error")
-                yield Button("Save and continue", variant="success", id="setup-save")
-                yield Button("Exit", id="setup-exit")
+                with Horizontal(id="setup-actions"):
+                    yield Button("Save and continue", id="setup-save")
+                    yield Button("Exit", id="setup-exit")
 
         def on_mount(self) -> None:
             self.query_one("#setup-provider", Select).focus()
@@ -159,8 +160,21 @@ if App is not object:
             ("ctrl+c", "copy_or_cancel", "Copy/Cancel"),
         ]
         CSS = """
+        $primary: #303030;
+        $secondary: #4a4a4a;
+        $accent: #bdbdbd;
+        $success: #d0d0d0;
+        $warning: #b0b0b0;
+        $error: #bdbdbd;
+        $surface: #111111;
+        $panel: #1c1c1c;
+        $text: #f2f2f2;
+        $text-muted: #999999;
+        $surface-lighten-1: #1b1b1b;
+        $surface-lighten-2: #242424;
+
         Screen {
-            background: $surface;
+            background: #111111;
             width: 100%;
             height: 100%;
         }
@@ -169,25 +183,29 @@ if App is not object:
             height: 100%;
         }
         Header {
-            background: $primary;
-            color: $text;
+            background: #202020;
+            color: #f2f2f2;
         }
         Footer {
-            background: $panel;
+            background: #1c1c1c;
+            color: #bdbdbd;
+        }
+        ProviderSetupModal {
+            align: center middle;
         }
         #welcome {
             height: auto;
             width: 100%;
             margin: 0;
             padding: 1 2 0 2;
-            background: $surface;
+            background: #111111;
         }
         #welcome-title {
-            color: $accent;
+            color: #e0e0e0;
             text-style: bold;
         }
         #welcome-subtitle {
-            color: $text-muted;
+            color: #999999;
             padding: 0 0 1 0;
         }
         #chat-view {
@@ -196,7 +214,7 @@ if App is not object:
             border: none;
             padding: 1 2;
             margin: 0;
-            background: $surface;
+            background: #111111;
             scrollbar-size: 1 1;
         }
         #input-bar {
@@ -204,44 +222,69 @@ if App is not object:
             width: 100%;
             margin: 0;
             border: none;
-            background: $surface-lighten-1;
+            background: #1b1b1b;
         }
         #status-bar {
             height: 1;
             width: 100%;
             margin: 0;
             padding: 0 1;
-            background: $panel;
-            color: $text;
+            background: #1c1c1c;
+            color: #d0d0d0;
         }
         #status-bar .status-item {
             width: 1fr;
         }
         #status-text {
-            color: $success;
+            color: #d0d0d0;
         }
         #input-bar:focus {
             border: none;
-            background: $surface-lighten-2;
+            background: #242424;
+        }
+        Button {
+            background: #303030;
+            color: #f2f2f2;
+            border: none;
+        }
+        Button:hover, Button:focus {
+            background: #4a4a4a;
+            color: #ffffff;
         }
         #setup-dialog {
             width: 72;
             max-width: 90%;
             height: auto;
             padding: 1 2;
-            background: $surface;
-            border: round $accent;
+            background: #151515;
+            border: round #bdbdbd;
         }
         #setup-title {
-            color: $accent;
+            color: #e0e0e0;
             text-style: bold;
         }
         #setup-help, #setup-error {
-            color: $text-muted;
+            color: #999999;
             margin-bottom: 1;
         }
         #setup-error {
-            color: $error;
+            color: #bdbdbd;
+        }
+        #setup-actions {
+            width: 100%;
+            height: auto;
+            align: center middle;
+        }
+        #setup-actions Button {
+            margin: 0 1;
+        }
+        #setup-save {
+            background: #3a3a3a;
+            color: #ffffff;
+        }
+        #setup-exit {
+            background: #252525;
+            color: #d0d0d0;
         }
         """
 
