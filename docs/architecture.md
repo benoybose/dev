@@ -318,7 +318,7 @@ if __name__ == "__main__":
     app()
 ```
 
-Users launch the interactive interface with `dev tui`, or run a one-shot query with `dev ask "fix the login bug"`.
+Users launch the interactive interface with `dev` (or the explicit `dev tui`), or run a one-shot query with `dev ask "fix the login bug"`.
 
 **Textual TUI structure**:
 
@@ -577,6 +577,7 @@ The TUI provides session, agent, execution, and provider configuration commands:
 | `/api-key set` | Enter a masked API key | Updates user config securely |
 | `/config show` | Show active settings with a masked key | Reads `Settings` |
 | `/config reload` | Reload and display configuration | Reads `Settings` |
+| `/copy` | Copy selected transcript text or the full transcript | Native clipboard command |
 | `/agent` | Select a requested specialist perspective | Updates run state |
 | `/clear` | Clear current session context | Resets the `messages` list |
 | `/cancel` | Cancel the active run | Signals cancellation token |

@@ -1,8 +1,18 @@
 import asyncio
 
+import pytest
+
 from dev import configuration
 from dev.configuration import ModelInfo
+from dev.tui import app as tui_app
 from dev.tui.app import DevTUI
+
+
+@pytest.fixture(autouse=True)
+def configured_provider(monkeypatch):
+    """Keep ordinary TUI interaction tests behind the first-run setup gate."""
+    monkeypatch.setenv("DEV_PROVIDER", "openrouter")
+    monkeypatch.setenv("DEV_API_KEY", "test-key")
 
 
 async def submit_command(pilot, command: str) -> None:
@@ -14,8 +24,110 @@ async def submit_command(pilot, command: str) -> None:
 def test_textual_app_smoke():
     async def run() -> None:
         async with DevTUI().run_test() as pilot:
+            assert pilot.app.focused.id == "input-bar"
+            await pilot.press(*list("hello"))
+            assert pilot.app.query_one("#input-bar").value == "hello"
+            await pilot.press("ctrl+a", "backspace")
             await pilot.press("h", "e", "l", "p", "enter")
             await pilot.pause()
+
+    asyncio.run(run())
+
+
+def test_textual_layout_has_chrome_and_keyboard_actions():
+    async def run() -> None:
+        async with DevTUI().run_test() as pilot:
+            assert pilot.app.query_one("#welcome")
+            assert pilot.app.query_one("Header")
+            assert pilot.app.query_one("Footer")
+            await pilot.press("f1")
+            await pilot.press("ctrl+l")
+            await pilot.pause()
+
+    asyncio.run(run())
+
+
+def test_unconfigured_provider_opens_setup_gate(monkeypatch):
+    monkeypatch.setattr(DevTUI, "_needs_provider_setup", staticmethod(lambda _settings: True))
+
+    async def run() -> None:
+        async with DevTUI().run_test() as pilot:
+            assert pilot.app.screen.query_one("#setup-dialog")
+            assert pilot.app.screen.query_one("#setup-provider")
+            assert pilot.app.screen.query_one("#setup-save")
+
+    asyncio.run(run())
+
+
+def test_setup_saves_to_workspace_env_when_it_controls_precedence(monkeypatch, tmp_path):
+    from dev.config import Settings
+
+    workspace_env = tmp_path / ".env"
+    workspace_env.write_text("DEV_API_KEY=sk-placeholder\n", encoding="utf-8")
+    settings = Settings(
+        provider="openrouter",
+        api_key="test-key",
+        base_url="https://openrouter.ai/api/v1",
+        model="test-model",
+        workspace=tmp_path,
+    )
+    saved = {}
+
+    class FakeUserConfig:
+        def __init__(self, path=None):
+            saved["path"] = path
+
+        def set_provider(self, provider):
+            saved["provider"] = provider
+
+        def update(self, values):
+            saved.update(values)
+
+        def set_api_key(self, api_key):
+            saved["api_key"] = api_key
+
+    monkeypatch.setattr("dev.config.Settings.load", staticmethod(lambda: settings))
+    monkeypatch.setattr(configuration, "UserConfig", FakeUserConfig)
+    monkeypatch.setattr(DevTUI, "_needs_provider_setup", staticmethod(lambda _settings: True))
+
+    async def run() -> None:
+        async with DevTUI().run_test() as pilot:
+            await pilot.click("#setup-save")
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert saved["path"] == workspace_env
+
+
+def test_prompt_has_command_and_mention_suggester(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("print('ok')", encoding="utf-8")
+
+    from dev.completion.suggester import CommandMentionSuggester
+
+    async def run() -> None:
+        suggester = CommandMentionSuggester(tmp_path)
+        assert await suggester.get_suggestion("/pro") == "/provider"
+        assert await suggester.get_suggestion("fix @src/") == "fix @src/main.py"
+
+    asyncio.run(run())
+
+
+def test_copy_command_copies_transcript_and_keyboard_shortcut(monkeypatch):
+    copied = []
+    monkeypatch.setattr(tui_app, "copy_to_clipboard", copied.append)
+
+    async def run() -> None:
+        async with DevTUI().run_test() as pilot:
+            pilot.app._write("hello transcript")
+            panel = pilot.app.query_one("#chat-view")
+            panel.focus()
+            panel.select_line(1)
+            await pilot.press("ctrl+shift+c")
+            assert copied == ["hello transcript"]
+            panel.select_all()
+            await submit_command(pilot, "/copy")
+            assert copied[-1].startswith("Ready. Type a task or /help for commands.\nhello transcript")
 
     asyncio.run(run())
 

@@ -90,7 +90,7 @@ Each part has a specific purpose:
 
 The selected extras provide:
 
-- `agent`: LangChain, LangGraph, SQLite checkpoint support, and the OpenAI-compatible model adapter.
+- `agent`: LangChain, LangGraph, synchronous/asynchronous SQLite checkpoint support, and the OpenAI-compatible model adapter.
 - `tui`: Textual for the terminal user interface.
 - `cli`: Typer for the `dev` command and subcommands.
 - `dev`: pytest, coverage tooling, Ruff, and Pyright for development and validation.
@@ -380,6 +380,7 @@ trusted.
 The Textual user interface is included by the `tui` extra:
 
 ```text
+dev
 dev tui
 ```
 
@@ -388,6 +389,13 @@ Resume a named session from the TUI when supported by the installed version:
 ```text
 dev tui --session local-dev
 ```
+
+The prompt is focused automatically when the TUI starts. Slash commands and
+`@` workspace mentions offer autocomplete suggestions; press the right arrow
+to accept one. Press `F1` for help,
+`Ctrl+L` to clear the chat, `F2` or `Ctrl+Insert` to copy selected transcript
+text, or `Ctrl+C` to copy a focused selection/cancel an active run. You can
+also use `/copy`; it copies the full transcript when no text is selected.
 
 ### TUI provider and model commands
 

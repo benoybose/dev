@@ -22,6 +22,20 @@ def main() -> None:
 if typer:
     app = typer.Typer(help="dev - local-first AI coding agent")
 
+    def _launch_tui(session: str | None = None) -> None:
+        """Launch the TUI, shared by the default entry point and subcommand."""
+        try:
+            from dev.tui.app import DevTUI
+        except ImportError:
+            raise typer.BadParameter("Install the TUI extra: pip install 'dev-coding-agent[tui]'")
+        DevTUI(session_id=session).run()
+
+    @app.callback(invoke_without_command=True)
+    def default_command(ctx: typer.Context) -> None:
+        """Start the TUI when no explicit CLI command is supplied."""
+        if ctx.invoked_subcommand is None:
+            _launch_tui()
+
     @app.command()
     def ask(prompt: str, session: str | None = typer.Option(None), json_output: bool = typer.Option(False, "--json"), approve: bool = typer.Option(False, "--approve-all")):
         """Run a single coding-agent query."""
@@ -106,8 +120,4 @@ if typer:
     @app.command()
     def tui(session: str | None = typer.Option(None)):
         """Launch the interactive terminal UI."""
-        try:
-            from dev.tui.app import DevTUI
-        except ImportError:
-            raise typer.BadParameter("Install the TUI extra: pip install 'dev-coding-agent[tui]'")
-        DevTUI(session_id=session).run()
+        _launch_tui(session)

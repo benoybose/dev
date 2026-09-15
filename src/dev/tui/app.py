@@ -1,12 +1,38 @@
 from __future__ import annotations
 
+import platform
+import shutil
+import subprocess
+from pathlib import Path
+from typing import ClassVar
+
 try:
     from textual.app import App, ComposeResult
-    from textual.containers import Vertical
+    from textual.containers import Horizontal, Vertical
     from textual.screen import ModalScreen
-    from textual.widgets import Button, Input, Label, RichLog, Static
+    from textual.widgets import Button, Footer, Header, Input, Label, Select, Static, TextArea
 except ImportError:  # pragma: no cover
     App = object
+
+
+def copy_to_clipboard(text: str) -> None:
+    """Copy text using a native clipboard command on the current platform."""
+    if not text:
+        raise RuntimeError("The transcript is empty.")
+    system = platform.system()
+    commands = {
+        "Windows": [["clip.exe"], ["clip"]],
+        "Darwin": [["pbcopy"]],
+        "Linux": [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]],
+    }.get(system, [])
+    for command in commands:
+        if shutil.which(command[0]):
+            try:
+                subprocess.run(command, input=text, text=True, check=True, timeout=5)  # nosec B603
+                return
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise RuntimeError(f"Unable to copy transcript with {command[0]}: {exc}") from exc
+    raise RuntimeError("No clipboard utility found. Install wl-copy, xclip, or xsel.")
 
 
 if App is not object:
@@ -52,25 +78,275 @@ if App is not object:
                 self.done(event.value)
                 self.dismiss()
 
+    class ProviderSetupModal(ModalScreen):
+        def __init__(self, settings, done):
+            super().__init__()
+            self.settings = settings
+            self.done = done
+
+        def compose(self) -> ComposeResult:
+            from dev.configuration import PROVIDERS
+
+            options = [(name.title(), name) for name in sorted(PROVIDERS)]
+            provider = self.settings.provider if self.settings.provider in PROVIDERS else "openrouter"
+            with Vertical(id="setup-dialog"):
+                yield Label("First-time provider setup", id="setup-title")
+                yield Label("Configure a provider before starting your first agent run.", id="setup-help")
+                yield Select(options, value=provider, prompt="Provider", id="setup-provider")
+                yield Input(value="" if self.settings.api_key == "sk-placeholder" else self.settings.api_key,
+                            placeholder="API key (not required for Ollama)", password=True, id="setup-api-key")
+                yield Input(value=self.settings.base_url, placeholder="Base URL", id="setup-base-url")
+                yield Input(value=self.settings.model, placeholder="Model identifier", id="setup-model")
+                yield Label("", id="setup-error")
+                yield Button("Save and continue", variant="success", id="setup-save")
+                yield Button("Exit", id="setup-exit")
+
+        def on_mount(self) -> None:
+            self.query_one("#setup-provider", Select).focus()
+
+        def on_select_changed(self, event: Select.Changed) -> None:
+            from dev.configuration import PROVIDERS
+
+            provider = str(event.value)
+            base_url = PROVIDERS.get(provider, {}).get("base_url", "")
+            if base_url:
+                self.query_one("#setup-base-url", Input).value = base_url
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "setup-exit":
+                self.app.exit()
+                return
+            if event.button.id != "setup-save":
+                return
+            from dev.configuration import ConfigurationError, UserConfig
+
+            provider = str(self.query_one("#setup-provider", Select).value)
+            api_key = self.query_one("#setup-api-key", Input).value.strip()
+            base_url = self.query_one("#setup-base-url", Input).value.strip()
+            model = self.query_one("#setup-model", Input).value.strip()
+            if provider == str(Select.BLANK):
+                self.query_one("#setup-error", Label).update("Select a provider.")
+                return
+            if provider != "ollama" and not api_key:
+                self.query_one("#setup-error", Label).update("Enter an API key, or choose Ollama for a local model.")
+                return
+            if not base_url or not model:
+                self.query_one("#setup-error", Label).update("Base URL and model are required.")
+                return
+            try:
+                workspace_env = self.settings.workspace / ".env"
+                config = UserConfig(workspace_env if workspace_env.is_file() else None)
+                config.set_provider(provider)
+                config.update({"DEV_BASE_URL": base_url, "DEV_MODEL": model})
+                if api_key:
+                    config.set_api_key(api_key)
+            except (ConfigurationError, OSError) as exc:
+                self.query_one("#setup-error", Label).update(str(exc))
+                return
+            self.done()
+            self.dismiss()
+
     class DevTUI(App):
         CSS_PATH = None
+        TITLE = "dev • coding agent"
+        SUB_TITLE = "local-first • approval-gated"
+        BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
+            ("f1", "show_help", "Help"),
+            ("ctrl+l", "clear_chat", "Clear"),
+            ("ctrl+shift+c", "copy_transcript", "Copy"),
+            ("ctrl+insert", "copy_transcript", "Copy"),
+            ("f2", "copy_transcript", "Copy"),
+            ("ctrl+c", "copy_or_cancel", "Copy/Cancel"),
+        ]
+        CSS = """
+        Screen {
+            background: $surface;
+            width: 100%;
+            height: 100%;
+        }
+        Screen > Vertical {
+            width: 100%;
+            height: 100%;
+        }
+        Header {
+            background: $primary;
+            color: $text;
+        }
+        Footer {
+            background: $panel;
+        }
+        #welcome {
+            height: auto;
+            width: 100%;
+            margin: 0;
+            padding: 1 2 0 2;
+            background: $surface;
+        }
+        #welcome-title {
+            color: $accent;
+            text-style: bold;
+        }
+        #welcome-subtitle {
+            color: $text-muted;
+            padding: 0 0 1 0;
+        }
+        #chat-view {
+            height: 1fr;
+            width: 100%;
+            border: none;
+            padding: 1 2;
+            margin: 0;
+            background: $surface;
+            scrollbar-size: 1 1;
+        }
+        #input-bar {
+            height: 3;
+            width: 100%;
+            margin: 0;
+            border: none;
+            background: $surface-lighten-1;
+        }
+        #status-bar {
+            height: 1;
+            width: 100%;
+            margin: 0;
+            padding: 0 1;
+            background: $panel;
+            color: $text;
+        }
+        #status-bar .status-item {
+            width: 1fr;
+        }
+        #status-text {
+            color: $success;
+        }
+        #input-bar:focus {
+            border: none;
+            background: $surface-lighten-2;
+        }
+        #setup-dialog {
+            width: 72;
+            max-width: 90%;
+            height: auto;
+            padding: 1 2;
+            background: $surface;
+            border: round $accent;
+        }
+        #setup-title {
+            color: $accent;
+            text-style: bold;
+        }
+        #setup-help, #setup-error {
+            color: $text-muted;
+            margin-bottom: 1;
+        }
+        #setup-error {
+            color: $error;
+        }
+        """
 
         def __init__(self, session_id: str | None = None):
             super().__init__()
             self.session_id = session_id or "default"
+            try:
+                from dev.config import Settings
+                self._workspace = Settings.load().workspace
+            except (OSError, ValueError):
+                self._workspace = Path.cwd()
             self._cancellation = None
             self._requested_agent = "supervisor"
             self._provider_choices: list[str] = []
             self._model_choices: list[str] = []
+            self._transcript: list[str] = []
 
         def compose(self) -> ComposeResult:
+            from dev.completion.suggester import CommandMentionSuggester
+
             with Vertical():
-                yield RichLog(id="chat-view", wrap=True)
-                yield Input(placeholder="Enter a task... use @ to reference files", id="input-bar")
-                yield Static("agent: idle", id="status-bar")
+                yield Header(show_clock=True)
+                with Vertical(id="welcome"):
+                    yield Static("DEV CODING AGENT", id="welcome-title")
+                    yield Static(
+                        "Describe a task, reference files with @path, or use /help for commands.",
+                        id="welcome-subtitle",
+                    )
+                yield TextArea(
+                    id="chat-view",
+                    read_only=True,
+                    soft_wrap=True,
+                    show_line_numbers=False,
+                    placeholder="Transcript will appear here...",
+                )
+                yield Input(
+                    placeholder="Enter a task... use /commands or @file mentions",
+                    suggester=CommandMentionSuggester(self._workspace),
+                    id="input-bar",
+                )
+                with Horizontal(id="status-bar"):
+                    yield Static("● ready", id="status-text", classes="status-item")
+                    yield Static(f"session: {self.session_id}", id="session-text", classes="status-item")
+                yield Footer()
+
+        def on_mount(self) -> None:
+            from dev.config import Settings
+
+            settings = Settings.load()
+            if self._needs_provider_setup(settings):
+                self.push_screen(ProviderSetupModal(settings, self._finish_setup))
+            else:
+                self._finish_setup()
+
+        @staticmethod
+        def _needs_provider_setup(settings) -> bool:
+            return settings.provider != "ollama" and settings.api_key in {"", "sk-placeholder"}
+
+        def _finish_setup(self) -> None:
+            self.query_one("#input-bar", Input).focus()
+            self._write("Ready. Type a task or /help for commands.")
+
+        def action_show_help(self) -> None:
+            self._write(
+                "Commands: /help /provider /model /api-key set /config show "
+                "/session /agent /copy /clear /rollback /cancel /exit\n"
+                "Shortcuts: F1 help • Ctrl+L clear • F2/Ctrl+Insert copy • Ctrl+C copy selection or cancel"
+            )
+
+        def action_clear_chat(self) -> None:
+            self.query_one("#chat-view", TextArea).text = ""
+            self._transcript.clear()
+            self._write("Chat cleared. Ready for your next task.")
+
+        def action_copy_transcript(self) -> None:
+            panel = self.query_one("#chat-view", TextArea)
+            selected = panel.selected_text
+            content = selected if selected else "\n".join(self._transcript)
+            try:
+                copy_to_clipboard(content)
+            except RuntimeError as exc:
+                self.query_one("#status-text", Static).update(f"● copy failed: {exc}")
+            else:
+                label = "selection" if selected else "transcript"
+                self.query_one("#status-text", Static).update(f"● copied {label} to clipboard")
+
+        def action_copy_or_cancel(self) -> None:
+            panel = self.query_one("#chat-view", TextArea)
+            if panel.selected_text:
+                self.action_copy_transcript()
+            else:
+                self.action_cancel_run()
+
+        def action_cancel_run(self) -> None:
+            if self._cancellation:
+                self._cancellation.cancel()
+                self._write("Cancellation requested.")
+            else:
+                self._write("No active run to cancel.")
 
         def _write(self, message: str) -> None:
-            self.query_one("#chat-view", RichLog).write(message)
+            self._transcript.append(message)
+            panel = self.query_one("#chat-view", TextArea)
+            panel.text = "\n".join(self._transcript)
+            panel.scroll_end(animate=False)
 
         def _show_providers(self) -> None:
             from dev.configuration import PROVIDERS
@@ -156,9 +432,11 @@ if App is not object:
             if value == "/exit":
                 self.exit()
             elif value == "/clear":
-                self.query_one("#chat-view", RichLog).clear()
+                self.action_clear_chat()
             elif value == "/help":
-                self._write("/provider [list|<number>|<name>] /model [list|free|tools|<filter>|<number>|<id>] /api-key set /config show /config reload /session /agent /clear /rollback /cancel /exit")
+                self.action_show_help()
+            elif value == "/copy":
+                self.action_copy_transcript()
             elif value == "/provider" or value == "/provider list":
                 self._show_providers()
             elif value.startswith("/provider use "):
@@ -180,75 +458,75 @@ if App is not object:
                 def save_key(api_key: str) -> None:
                     try:
                         UserConfig().set_api_key(api_key)
-                        self.query_one("#chat-view", RichLog).write("API key saved securely to the user configuration file.")
+                        self._write("API key saved securely to the user configuration file.")
                     except ConfigurationError as exc:
-                        self.query_one("#chat-view", RichLog).write(str(exc))
+                        self._write(str(exc))
                 self.push_screen(SecretInputModal(save_key))
             elif value == "/config show":
                 from dev.config import Settings
                 from dev.configuration import mask_secret
                 settings = Settings.load()
-                self.query_one("#chat-view", RichLog).write(
+                self._write(
                     f"provider: {settings.provider}\nbase_url: {settings.base_url}\nmodel: {settings.model}\napi_key: {mask_secret(settings.api_key)}\nworkspace: {settings.workspace}"
                 )
             elif value == "/config reload":
                 from dev.config import Settings
                 settings = Settings.load()
-                self.query_one("#chat-view", RichLog).write(f"Configuration reloaded: {settings.provider} / {settings.model}")
+                self._write(f"Configuration reloaded: {settings.provider} / {settings.model}")
             elif value == "/session":
                 from dev.config import Settings
                 from dev.harness.session import SessionStore
                 sessions = SessionStore(Settings.load().session_db).list_sessions()
-                self.query_one("#chat-view", RichLog).write("\n".join(f"{item['id'][:8]}  {item['name']}" for item in sessions) or "No saved sessions.")
+                self._write("\n".join(f"{item['id'][:8]}  {item['name']}" for item in sessions) or "No saved sessions.")
             elif (value.startswith("/session ") and not value.startswith("/session rename ")
                   and not value.startswith("/session export ") and not value.startswith("/session import ")):
                 self.session_id = value.partition(" ")[2].strip()
-                self.query_one("#chat-view", RichLog).write(f"Switched to session: {self.session_id}")
+                self._write(f"Switched to session: {self.session_id}")
             elif value.startswith("/agent"):
                 requested = value.partition(" ")[2].strip() or "supervisor"
                 if requested not in {"supervisor", "planner", "coder", "tester"}:
-                    self.query_one("#chat-view", RichLog).write("Choose: supervisor, planner, coder, or tester")
+                    self._write("Choose: supervisor, planner, coder, or tester")
                 else:
                     self._requested_agent = requested
-                    self.query_one("#status-bar", Static).update(f"agent: {requested}")
+                    self.query_one("#status-text", Static).update(f"● agent: {requested}")
             elif value == "/cancel":
                 if self._cancellation:
                     self._cancellation.cancel()
-                    self.query_one("#chat-view", RichLog).write("Cancellation requested.")
+                    self._write("Cancellation requested.")
             elif value == "/rollback":
                 from dev.config import Settings
                 from dev.harness.changes import ChangeJournal
                 restored = ChangeJournal(Settings.load().session_db).rollback(self.session_id or "")
-                self.query_one("#chat-view", RichLog).write("Restored: " + ", ".join(restored) if restored else "No safe changes to restore.")
+                self._write("Restored: " + ", ".join(restored) if restored else "No safe changes to restore.")
             elif value.startswith("/session rename "):
                 from dev.config import Settings
                 from dev.harness.session import SessionStore
                 name = value.partition(" ")[2].partition(" ")[2].strip()
                 if SessionStore(Settings.load().session_db).rename(self.session_id, name):
                     self.session_id = name
-                    self.query_one("#chat-view", RichLog).write(f"Renamed session to: {name}")
+                    self._write(f"Renamed session to: {name}")
                 else:
-                    self.query_one("#chat-view", RichLog).write("Session not found.")
+                    self._write("Session not found.")
             elif value.startswith("/session export "):
                 from dev.config import Settings
                 from dev.harness.session import SessionStore
                 destination = value.partition(" ")[2].partition(" ")[2].strip()
                 try:
                     exported = SessionStore(Settings.load().session_db).export_session(self.session_id, destination)
-                    self.query_one("#chat-view", RichLog).write(f"Exported session: {exported}")
+                    self._write(f"Exported session: {exported}")
                 except (KeyError, OSError, ValueError) as exc:
-                    self.query_one("#chat-view", RichLog).write(f"Export failed: {exc}")
+                    self._write(f"Export failed: {exc}")
             elif value.startswith("/session import "):
                 from dev.config import Settings
                 from dev.harness.session import SessionStore
                 source = value.partition(" ")[2].partition(" ")[2].strip()
                 try:
                     self.session_id = SessionStore(Settings.load().session_db).import_session(source)
-                    self.query_one("#chat-view", RichLog).write(f"Imported session: {self.session_id}")
+                    self._write(f"Imported session: {self.session_id}")
                 except (OSError, TypeError, ValueError, KeyError) as exc:
-                    self.query_one("#chat-view", RichLog).write(f"Import failed: {exc}")
+                    self._write(f"Import failed: {exc}")
             else:
-                self.query_one("#chat-view", RichLog).write(f"> {value}")
+                self._write(f"> {value}")
                 self.run_worker(self._ask(value), exclusive=False)
 
         async def _ask(self, value: str) -> None:
@@ -263,9 +541,8 @@ if App is not object:
             previous = store.load(self.session_id)
             self._cancellation = CancellationToken()
             cleaned, files, missing = parse_file_mentions(value, settings.workspace)
-            log = self.query_one("#chat-view", RichLog)
             if missing:
-                log.write("Unknown mentions: " + ", ".join(missing))
+                self._write("Unknown mentions: " + ", ".join(missing))
                 return
             try:
                 import threading
@@ -283,9 +560,9 @@ if App is not object:
                     return ask_approval(request.action, request.target, request.reason)
                 def event_sink(event):
                     if event.get("type") == "token":
-                        self.call_from_thread(self.query_one("#chat-view", RichLog).write, event.get("text", ""))
+                        self.call_from_thread(self._write, event.get("text", ""))
                     else:
-                        self.call_from_thread(self.query_one("#status-bar", Static).update, f"agent: {event.get('agent', event.get('type', 'running'))}")
+                        self.call_from_thread(self.query_one("#status-text", Static).update, f"● {event.get('agent', event.get('type', 'running'))}")
                 initial = {"task": cleaned, "messages": previous["state"].get("messages", []) if previous else [],
                            "events": previous["state"].get("events", []) if previous else [],
                            "iteration": previous["state"].get("iteration", 0) if previous else 0,
@@ -294,9 +571,9 @@ if App is not object:
                                                       cancellation=self._cancellation, event_sink=event_sink,
                                                       session_id=self.session_id).ainvoke(initial)
                 store.save(previous["id"] if previous else self.session_id, self.session_id, result)
-                log.write(result["result"])
+                self._write(result["result"])
             except (OSError, RuntimeError, ValueError) as exc:
-                log.write(f"Agent error: {exc}")
+                self._write(f"Agent error: {exc}")
 else:
     class DevTUI:  # pragma: no cover
         def __init__(self, session_id=None): self.session_id = session_id

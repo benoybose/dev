@@ -116,7 +116,7 @@ pip install -e ".[agent,anthropic,google,embeddings,tracing,dev]"
 
 | Extra | Packages | Purpose |
 |---|---|---|
-| `agent` | langchain, langgraph, langgraph-checkpoint-sqlite, langchain-openai | Core agent runtime |
+| `agent` | langchain, langgraph, langgraph-checkpoint-sqlite, aiosqlite, langchain-openai | Core agent runtime and async SQLite checkpoints |
 | `tui` | textual | Textual TUI |
 | `cli` | typer | Typer CLI |
 | `openai` | langchain-openai | OpenAI provider |
@@ -234,6 +234,9 @@ directories before invoking `dev`; do not configure a fixed workspace path in
 
 The `dev` CLI exposes the following commands:
 
+Running `dev` without a subcommand starts the interactive TUI. The explicit
+`dev tui` form remains available, including its session option.
+
 ### `dev ask`
 
 Run a single agent task.
@@ -256,6 +259,11 @@ Launch the interactive Textual TUI.
 ```bash
 dev tui
 ```
+
+The TUI starts with the prompt focused. Slash commands and workspace file
+mentions provide ghost-text autocomplete; press the right arrow to accept a
+suggestion. Use `F1` for help, `Ctrl+L` to clear the conversation, and
+`Ctrl+C` to cancel an active agent run.
 
 Inside the TUI, provider and model settings can be managed with:
 
@@ -344,7 +352,13 @@ Launch the TUI with `dev tui`.
 | `/approve` | Approve a pending write or command |
 | `/reject` | Reject a pending write or command |
 | `/clear` | Clear the current conversation |
+| `/copy` | Copy the selected transcript text, or the full transcript if nothing is selected |
 | `/help` | Show help for available commands |
+
+Select transcript text with the terminal mouse or Textual keyboard selection,
+then press `F2`, `Ctrl+Insert`, `Ctrl+Shift+C`, or run `/copy`. `Ctrl+C` also
+copies when the transcript selection is focused; otherwise it cancels the
+active run. If there is no selection, the full transcript is copied.
 
 > **Note:** The command set is minimal by design. Additional commands may be added in future releases.
 
