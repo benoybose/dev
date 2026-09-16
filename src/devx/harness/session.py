@@ -10,7 +10,12 @@ from typing import Any
 
 class SessionStore:
     def __init__(self, db_path: Path | None = None):
-        self.db_path = (db_path or Path.home() / ".dev" / "sessions.db").expanduser()
+        if db_path is None:
+            default_path = Path.home() / ".devx" / "sessions.db"
+            legacy_path = Path.home() / ".dev" / "sessions.db"
+            self.db_path = (legacy_path if not default_path.exists() and legacy_path.exists() else default_path).expanduser()
+        else:
+            self.db_path = Path(db_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
@@ -26,6 +31,8 @@ class SessionStore:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
         return conn
 
     def save(self, session_id: str | None, name: str, state: dict[str, Any], metadata: dict[str, Any] | None = None) -> str:

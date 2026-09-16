@@ -12,7 +12,12 @@ def select_relevant_files(query: str, candidate_files: list[Path], max_files: in
             q = embedder.embed([query])[0]
             contents = [f.read_text(encoding="utf-8", errors="ignore")[:2000] for f in candidate_files]
             vectors = embedder.embed(contents)
-            scores = vectors @ q
+            try:
+                import numpy as np
+
+                scores = list(np.asarray(vectors) @ np.asarray(q))
+            except ImportError:
+                scores = [sum(a * b for a, b in zip(v, q)) for v in vectors]
             return [candidate_files[i] for i in sorted(range(len(candidate_files)), key=lambda i: scores[i], reverse=True)[:max_files]]
         except (OSError, TypeError, ValueError):
             pass

@@ -3,17 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from dev.agents.graph import DevState
-from dev.agents.runtime import build_coding_agent, response_text, stream_agent_text
-from dev.harness.approval import ApprovalManager
-from dev.harness.changes import ChangeJournal
-from dev.harness.permissions import PermissionPolicy
-from dev.harness.runtime import CancellationToken, RunCancelled
-from dev.harness.session import SessionStore
-from dev.harness.testing import detect_test_command
-from dev.harness.tools import WorkspaceTools
-from dev.llm import invoke_with_retry
-from dev.token_optim.context import read_context
+from devx.agents.graph import DevxState
+from devx.agents.runtime import build_coding_agent, response_text, stream_agent_text
+from devx.harness.approval import ApprovalManager
+from devx.harness.changes import ChangeJournal
+from devx.harness.permissions import PermissionPolicy
+from devx.harness.runtime import CancellationToken, RunCancelled
+from devx.harness.session import SessionStore
+from devx.harness.testing import detect_test_command
+from devx.harness.tools import WorkspaceTools
+from devx.llm import invoke_with_retry
+from devx.token_optim.context import read_context
 
 
 @dataclass
@@ -34,7 +34,7 @@ class SupervisorRunner:
                                     timeout=self.settings.command_timeout, run_id=self.run_id, journal=journal,
                                     cancellation=self.cancellation)
 
-    def _event(self, state: DevState, event: dict[str, Any]) -> None:
+    def _event(self, state: DevxState, event: dict[str, Any]) -> None:
         state.events.append(event)
         self.sessions.append_event(self.session_id or self.run_id, self.run_id, event)
         if self.event_sink:
@@ -43,12 +43,12 @@ class SupervisorRunner:
     def _approve(self, action: str, target: str, reason: str = "") -> bool:
         return self.approvals.allows(self.run_id, action, target, reason)
 
-    def __call__(self, state: DevState) -> DevState:
+    def __call__(self, state: DevxState) -> DevxState:
         state.status = "running"
         try:
             self.cancellation.raise_if_cancelled()
             self._event(state, {"type": "agent_started", "agent": "planner"})
-            from dev.llm import create_llm
+            from devx.llm import create_llm
             model = create_llm(self.settings)
             context = read_context([__import__("pathlib").Path(path) for path in state.files_in_context], self.settings.max_file_bytes)
             plan_response = invoke_with_retry(model, 
@@ -119,3 +119,6 @@ class SupervisorRunner:
             self._event(state, {"type": "error", "error": str(exc)})
             state.result = f"Agent run failed: {exc}"
         return state
+
+
+DevState = DevxState

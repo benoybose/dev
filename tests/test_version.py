@@ -26,7 +26,7 @@ def test_invalid_versions_are_rejected():
 
 def test_write_version_updates_project_and_runtime_metadata(tmp_path):
     (tmp_path / "pyproject.toml").write_text('version = "1.0.0"\n', encoding="utf-8")
-    package = tmp_path / "src" / "dev"
+    package = tmp_path / "src" / "devx"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text('__version__ = "1.0.0"\n', encoding="utf-8")
 

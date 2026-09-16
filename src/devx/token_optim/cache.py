@@ -23,17 +23,23 @@ class SemanticCache:
     def __init__(self, db_path: Path, threshold: float = 0.95, embedder=None):
         self.db_path, self.threshold, self.embedder = Path(db_path).expanduser(), threshold, embedder
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, query TEXT, response TEXT, embedding TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)")
             columns = {row[1] for row in conn.execute("PRAGMA table_info(cache)")}
             if "embedding" not in columns:
                 conn.execute("ALTER TABLE cache ADD COLUMN embedding TEXT")
 
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
+        return conn
+
     def key(self, query: str, fingerprint: str = "") -> str:
         return hashlib.sha256((query.strip() + "\0" + fingerprint).encode()).hexdigest()
 
     def get(self, query: str, fingerprint: str = "") -> str | None:
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             row = conn.execute("SELECT response FROM cache WHERE key=?", (self.key(query, fingerprint),)).fetchone()
             if row:
                 return row[0]
@@ -51,5 +57,5 @@ class SemanticCache:
         embedding = None
         if self.embedder is not None:
             embedding = json.dumps([float(value) for value in self.embedder.embed([query])[0]])
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             conn.execute("INSERT OR REPLACE INTO cache(key,query,response,embedding) VALUES(?,?,?,?)", (self.key(query, fingerprint), query, response, embedding))

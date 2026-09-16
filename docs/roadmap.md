@@ -1,8 +1,8 @@
-# `dev` Production Roadmap
+# `devx` Production Roadmap
 
 ## Current status
 
-`dev` is at a production-candidate stage for local validation. The core
+`devx` is at a production-candidate stage for local validation. The core
 package, CLI, TUI, LangGraph supervisor, approval controls, sessions, local
 context optimization, testing hooks, packaging, and CI definitions are in
 place.
@@ -23,7 +23,7 @@ Current local validation:
 
 - Push the repository to GitHub.
 - Run the CI matrix on Windows, Linux, and macOS with Python 3.11–3.13.
-- Verify the package job builds, installs, and runs `dev doctor`.
+- Verify the package job builds, installs, and runs `devx doctor`.
 - Configure short-lived staging credentials for supported providers.
 - Run live acceptance tests for OpenAI-compatible, Anthropic, Google, and
   Azure configurations where credentials and deployments are available.
@@ -37,7 +37,7 @@ Current local validation:
 - Create the `v0.1.0` tag.
 - Publish through the release workflow.
 - Install the published package in a clean environment.
-- Verify `dev doctor`, `dev sessions`, `dev ask`, and `dev tui` after install.
+- Verify `devx doctor`, `devx sessions`, `devx ask`, and `devx tui` after install.
 
 ## Post-release 0.2.0
 

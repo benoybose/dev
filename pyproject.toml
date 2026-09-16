@@ -3,7 +3,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "dev-coding-agent"
+name = "devx-coding-agent"
 version = "0.1.0"
 description = "A local-first, approval-gated AI coding agent."
 readme = "README.md"
@@ -24,15 +24,15 @@ dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "pyright>=1.1"]
 all = ["langchain>=1.0", "langgraph>=1.0", "langgraph-checkpoint-sqlite>=2.0", "langchain-openai>=1.0", "langchain-anthropic>=1.0", "langchain-google-genai>=2.0", "textual>=0.70", "typer>=0.12", "numpy>=1.26", "onnxruntime>=1.18", "transformers>=4.40", "sentence-transformers>=3.0", "langsmith>=0.2"]
 
 [project.scripts]
-dev = "dev.cli.app:main"
+devx = "devx.cli.app:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/dev"]
+packages = ["src/devx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 
 [tool.ruff]
 line-length = 100

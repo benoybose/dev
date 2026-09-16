@@ -24,12 +24,12 @@ if App is not object:
                 yield Button("Cancel run", id="cancel")
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
-            from dev.harness.approval import ApprovalDecision
+            from devx.harness.approval import ApprovalDecision
             decision = {"approve": ApprovalDecision.APPROVE, "deny": ApprovalDecision.DENY, "cancel": ApprovalDecision.CANCEL}[event.button.id]
             self.done(decision)
             self.dismiss(decision)
 
-    class DevTUI(App):
+    class DevxTUI(App):
         CSS_PATH = None
 
         def __init__(self, session_id: str | None = None):
@@ -53,8 +53,8 @@ if App is not object:
             elif value == "/help":
                 self.query_one("#chat-view", RichLog).write("/help /session /agent /clear /rollback /cancel /exit")
             elif value == "/session":
-                from dev.config import Settings
-                from dev.harness.session import SessionStore
+                from devx.config import Settings
+                from devx.harness.session import SessionStore
                 sessions = SessionStore(Settings.load().session_db).list_sessions()
                 self.query_one("#chat-view", RichLog).write("\n".join(f"{item['id'][:8]}  {item['name']}" for item in sessions) or "No saved sessions.")
             elif value.startswith("/session "):
@@ -67,8 +67,8 @@ if App is not object:
                     self._cancellation.cancel()
                     self.query_one("#chat-view", RichLog).write("Cancellation requested.")
             elif value == "/rollback":
-                from dev.config import Settings
-                from dev.harness.changes import ChangeJournal
+                from devx.config import Settings
+                from devx.harness.changes import ChangeJournal
                 restored = ChangeJournal(Settings.load().session_db).rollback(self.session_id or "")
                 self.query_one("#chat-view", RichLog).write("Restored: " + ", ".join(restored) if restored else "No safe changes to restore.")
             else:
@@ -76,12 +76,12 @@ if App is not object:
                 self.run_worker(self._ask(value), exclusive=False)
 
         async def _ask(self, value: str) -> None:
-            from dev.agents.graph import build_supervisor_graph
-            from dev.completion.parser import parse_file_mentions
-            from dev.config import Settings
-            from dev.harness.approval import ApprovalDecision, ApprovalManager, ApprovalRequest
-            from dev.harness.runtime import CancellationToken
-            from dev.harness.session import SessionStore
+            from devx.agents.graph import build_supervisor_graph
+            from devx.completion.parser import parse_file_mentions
+            from devx.config import Settings
+            from devx.harness.approval import ApprovalDecision, ApprovalManager, ApprovalRequest
+            from devx.harness.runtime import CancellationToken
+            from devx.harness.session import SessionStore
             settings = Settings.load()
             store = SessionStore(settings.session_db)
             previous = store.load(self.session_id)
@@ -117,7 +117,11 @@ if App is not object:
                 log.write(result["result"])
             except (OSError, RuntimeError, ValueError) as exc:
                 log.write(f"Agent error: {exc}")
+
+    DevTUI = DevxTUI
 else:
-    class DevTUI:  # pragma: no cover
+    class DevxTUI:  # pragma: no cover
         def __init__(self, session_id=None): self.session_id = session_id
-        def run(self): raise RuntimeError("Install the TUI extra: pip install 'dev-coding-agent[tui]'")
+        def run(self): raise RuntimeError("Install the TUI extra: pip install 'devx-coding-agent[tui]'")
+
+    DevTUI = DevxTUI

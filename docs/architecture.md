@@ -1,8 +1,8 @@
-# `dev`: A Detailed Blueprint for Building an AI Coding Agent as a Local TUI and CLI
+# `devx`: A Detailed Blueprint for Building an AI Coding Agent as a Local TUI and CLI
 
 ## Executive Summary
 
-`dev` is a locally installed AI coding agent that works with any OpenAI-compatible inference API (including tool calling). It uses **LangChain** and **LangGraph** for the agentic harness, **Textual** for the terminal UI, **Typer** for the CLI entrypoint, and local embeddings for client-side token optimization. Users reference files and directories with `@` mentions and control sessions and agents with a minimal set of slash commands.
+`devx` is a locally installed AI coding agent that works with any OpenAI-compatible inference API (including tool calling). It uses **LangChain** and **LangGraph** for the agentic harness, **Textual** for the terminal UI, **Typer** for the CLI entrypoint, and local embeddings for client-side token optimization. Users reference files and directories with `@` mentions and control sessions and agents with a minimal set of slash commands.
 
 ---
 
@@ -65,10 +65,10 @@
 ## 3. Project Structure
 
 ```
-dev/
+devx/
 ├── pyproject.toml
 ├── README.md
-├── src/dev/
+├── src/devx/
 │   ├── __init__.py
 │   ├── main.py                 # Entry: TUI or CLI
 │   ├── config.py               # Env vars, API endpoint config
@@ -120,7 +120,7 @@ dev/
 
 ### 4.1 Model Abstraction: Any OpenAI-Compatible API
 
-`dev` is not bound to any provider. Users specify the endpoint via environment variables or a config file:
+`devx` is not bound to any provider. Users specify the endpoint via environment variables or a config file:
 
 ```python
 # config.py
@@ -129,9 +129,9 @@ from langchain_openai import ChatOpenAI
 
 def create_llm() -> ChatOpenAI:
     """Create a ChatOpenAI instance pointing at any OpenAI-compatible endpoint."""
-    base_url = os.getenv("DEV_BASE_URL", "http://localhost:4000/v1")
-    api_key = os.getenv("DEV_API_KEY", "sk-placeholder")
-    model = os.getenv("DEV_MODEL", "gpt-4o")
+    base_url = os.getenv("DEVX_BASE_URL", os.getenv("DEV_BASE_URL", "http://localhost:4000/v1"))
+    api_key = os.getenv("DEVX_API_KEY", os.getenv("DEV_API_KEY", "sk-placeholder"))
+    model = os.getenv("DEVX_MODEL", os.getenv("DEV_MODEL", "gpt-4o"))
 
     return ChatOpenAI(
         model=model,
@@ -146,12 +146,12 @@ def create_llm() -> ChatOpenAI:
 
 ```bash
 litellm --config litellm_config.yaml --port 4000
-export DEV_BASE_URL=http://localhost:4000
-export DEV_API_KEY=sk-your-master-key
-export DEV_MODEL=gpt-4o  # Must match model_name in the LiteLLM config
+export DEVX_BASE_URL=http://localhost:4000
+export DEVX_API_KEY=sk-your-master-key
+export DEVX_MODEL=gpt-4o  # Must match model_name in the LiteLLM config
 ```
 
-**Key constraint**: `DEV_MODEL` must match the `model_name` alias in the LiteLLM config, not the upstream raw model name.
+**Key constraint**: `DEVX_MODEL` must match the `model_name` alias in the LiteLLM config, not the upstream raw model name.
 
 ### 4.2 Agentic Harness (Multi-Agent Coordination)
 
@@ -162,16 +162,19 @@ Choose the **Supervisor pattern** because coding tasks require centralized contr
 from langgraph.graph import StateGraph, END
 from typing import Literal, TypedDict
 
-class DevState(TypedDict):
+class DevxState(TypedDict):
     messages: list
     task: str
     active_agent: str
     files_in_context: list[str]
     token_count: int
 
-def build_dev_graph():
+# Backwards-compatibility alias
+DevState = DevxState
+
+def build_devx_graph():
     """Build the supervisor-subagent state graph."""
-    workflow = StateGraph(DevState)
+    workflow = StateGraph(DevxState)
 
     # Nodes
     workflow.add_node("supervisor", supervisor_node)
@@ -200,18 +203,20 @@ def build_dev_graph():
         workflow.add_edge(agent, "supervisor")
 
     return workflow.compile()
+
+build_dev_graph = build_devx_graph
 ```
 
 **Supervisor routing logic**:
 
 ```python
-def supervisor_node(state: DevState) -> DevState:
+def supervisor_node(state: DevxState) -> DevxState:
     """Supervisor decides which agent to delegate to next."""
     # Use an LLM to analyze the current state and task
     # Return an active_agent update
     ...
 
-def route_from_supervisor(state: DevState) -> Literal[
+def route_from_supervisor(state: DevxState) -> Literal[
     "planner", "coder", "tester", "doc_writer", "FINISH"
 ]:
     return state["active_agent"]
@@ -230,7 +235,7 @@ import json
 from pathlib import Path
 
 class SessionStore:
-    def __init__(self, db_path: Path = Path.home() / ".dev" / "sessions.db"):
+    def __init__(self, db_path: Path = Path.home() / ".devx" / "sessions.db"):
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -243,7 +248,7 @@ class SessionStore:
                     name TEXT,
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP,
-                    state TEXT,  -- JSON-serialized DevState
+                    state TEXT,  -- JSON-serialized DevxState
                     metadata TEXT
                 )
             """)
@@ -261,11 +266,11 @@ class SessionStore:
         ...
 ```
 
-**Concurrent agents**: Different sessions can run different agent-graph instances simultaneously. Each `dev` process maintains its own `SessionStore` connection and LangGraph state. For parallel agents (e.g., running coder and tester at the same time), use Python `asyncio`:
+**Concurrent agents**: Different sessions can run different agent-graph instances simultaneously. Each `devx` process maintains its own `SessionStore` connection and LangGraph state. For parallel agents (e.g., running coder and tester at the same time), use Python `asyncio`:
 
 ```python
 # Run multiple agent tasks in parallel
-async def run_parallel_agents(agents: list, state: DevState):
+async def run_parallel_agents(agents: list, state: DevxState):
     tasks = [agent.ainvoke(state) for agent in agents]
     results = await asyncio.gather(*tasks)
     return results
@@ -278,15 +283,15 @@ async def run_parallel_agents(agents: list, state: DevState):
 ```python
 # cli/app.py
 import typer
-from dev.tui.app import DevTUI
-from dev.harness.session import SessionStore
+from devx.tui.app import DevxTUI
+from devx.harness.session import SessionStore
 
-app = typer.Typer(help="dev - AI coding agent", no_args_is_help=False)
+app = typer.Typer(help="devx - AI coding agent", no_args_is_help=False)
 
 @app.command()
 def tui(session: str = typer.Option(None, "--session", "-s")):
     """Launch the TUI interface."""
-    tui_app = DevTUI(session_id=session)
+    tui_app = DevxTUI(session_id=session)
     tui_app.run()
 
 @app.command()
@@ -305,7 +310,7 @@ if __name__ == "__main__":
     app()
 ```
 
-Users launch the interactive interface with `dev tui`, or run a one-shot query with `dev ask "fix the login bug"`.
+Users launch the interactive interface with `devx tui`, or run a one-shot query with `devx ask "fix the login bug"`.
 
 **Textual TUI structure**:
 
@@ -314,8 +319,9 @@ Users launch the interactive interface with `dev tui`, or run a one-shot query w
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Static, Input, RichLog
+from devx.agents.graph import build_devx_graph
 
-class DevTUI(App):
+class DevxTUI(App):
     CSS_PATH = "styles.tcss"
 
     def compose(self) -> ComposeResult:
@@ -332,7 +338,7 @@ class DevTUI(App):
 
     async def _invoke_agent(self, text: str, files: list):
         """Run LangGraph inside a background worker."""
-        graph = build_dev_graph()
+        graph = build_devx_graph()
         result = await graph.ainvoke({...})
         self.query_one("#chat-view").write(result["messages"][-1].content)
 ```
@@ -463,10 +469,10 @@ class LocalEmbedder:
 import sqlite3
 import numpy as np
 from pathlib import Path
-from dev.token_optim.embeddings import LocalEmbedder
+from devx.token_optim.embeddings import LocalEmbedder
 
 class SemanticCache:
-    def __init__(self, db_path: str = "~/.dev/cache.db", threshold: float = 0.95):
+    def __init__(self, db_path: str = "~/.devx/cache.db", threshold: float = 0.95):
         self.db_path = Path(db_path).expanduser()
         self.threshold = threshold
         self.embedder = LocalEmbedder()
@@ -513,7 +519,7 @@ class SemanticCache:
 # token_optim/context.py
 import numpy as np
 from pathlib import Path
-from dev.token_optim.embeddings import LocalEmbedder
+from devx.token_optim.embeddings import LocalEmbedder
 
 def select_relevant_files(
     query: str,
@@ -553,11 +559,11 @@ Following the "sufficient and minimal" principle, keep only 5 core commands:
 |---|---|---|
 | `/help` | Show available commands and usage | Static text |
 | `/session` | List, switch, and name sessions | Calls `SessionStore` |
-| `/agent` | Switch active agent (coder/planner/tester/docs) | Mutates `DevState.active_agent` |
+| `/agent` | Switch active agent (coder/planner/tester/docs) | Mutates `DevxState.active_agent` |
 | `/clear` | Clear current session context | Resets the `messages` list |
 | `/exit` | Quit the TUI | Triggers Textual `action_quit` |
 
-Intercept input beginning with `/` in the TUI's `Input` widget:
+Interceptors handle input beginning with `/` in the TUI's `Input` widget:
 
 ```python
 def on_input_submitted(self, event: Input.Submitted):
@@ -596,38 +602,38 @@ def _handle_slash_command(self, cmd: str):
 
 ```bash
 # From source
-git clone https://github.com/your-org/dev.git
-cd dev
+git clone https://github.com/your-org/devx-coding-agent.git
+cd devx
 pip install -e .
 
 # Or from PyPI
-pip install dev-coding-agent
+pip install devx-coding-agent
 ```
 
 ### Configuration
 
-Set the following in `~/.dev/config.env` or your shell environment:
+Set the following in `~/.devx/config.env` (or `~/.dev/config.env`) or your shell environment:
 
 ```bash
-export DEV_BASE_URL="https://your-litellm-proxy.com/v1"
-export DEV_API_KEY="sk-..."
-export DEV_MODEL="claude-sonnet-4"  # or any LiteLLM alias
+export DEVX_BASE_URL="https://your-litellm-proxy.com/v1"
+export DEVX_API_KEY="sk-..."
+export DEVX_MODEL="claude-sonnet-4"  # or any LiteLLM alias
 ```
 
 ### Usage
 
 ```bash
 # Launch the TUI
-dev tui
+devx tui
 
 # Launch the TUI with a named session
-dev tui --session "auth-bug-fix"
+devx tui --session "auth-bug-fix"
 
 # One-shot CLI query
-dev ask "Fix the login validation logic in @src/auth.py"
+devx ask "Fix the login validation logic in @src/auth.py"
 
 # List sessions
-dev sessions
+devx sessions
 ```
 
 ---

@@ -39,7 +39,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml src/dev/__init__.py
+          git add pyproject.toml src/devx/__init__.py
           if git diff --cached --quiet; then
             echo "Version is already current"
           else
