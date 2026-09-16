@@ -7,9 +7,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from dev.harness.changes import ChangeJournal, file_hash
-from dev.harness.permissions import PermissionError, PermissionPolicy
-from dev.harness.runtime import CancellationToken, RunCancelled
+from devx.harness.changes import ChangeJournal, file_hash
+from devx.harness.permissions import PermissionError, PermissionPolicy
+from devx.harness.runtime import CancellationToken, RunCancelled
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class WorkspaceTools:
             backup = backup_dir / f"{target.name}.{before}"
             if not backup.exists():
                 backup.write_bytes(target.read_bytes())
-        temporary = target.with_name(f".{target.name}.dev-tmp")
+        temporary = target.with_name(f".{target.name}.devx-tmp")
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             temporary.write_text(content, encoding="utf-8")
@@ -54,6 +54,12 @@ class WorkspaceTools:
             return ToolResult(True, f"Wrote {target}")
         except OSError as exc:
             return ToolResult(False, str(exc))
+        finally:
+            if temporary.exists():
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
 
     def replace(self, path: str | Path, old: str, new: str, *, expected_hash: str | None = None,
                 approved: bool = False) -> ToolResult:

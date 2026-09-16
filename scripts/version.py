@@ -40,7 +40,7 @@ def version_for_branch(current: str, branch: str) -> str:
 
 def write_version(version: str, root: Path) -> None:
     pyproject = root / "pyproject.toml"
-    init_file = root / "src" / "dev" / "__init__.py"
+    init_file = root / "src" / "devx" / "__init__.py"
     pyproject_text = pyproject.read_text(encoding="utf-8")
     updated = re.sub(r'(?m)^version\s*=\s*"[^"]+"$', f'version = "{version}"', pyproject_text, count=1)
     if updated == pyproject_text:
@@ -49,7 +49,7 @@ def write_version(version: str, root: Path) -> None:
     init_text = init_file.read_text(encoding="utf-8")
     init_updated = re.sub(r'(?m)^__version__\s*=\s*"[^"]+"$', f'__version__ = "{version}"', init_text, count=1)
     if init_updated == init_text:
-        raise RuntimeError("Could not find __version__ in src/dev/__init__.py")
+        raise RuntimeError("Could not find __version__ in src/devx/__init__.py")
     init_file.write_text(init_updated, encoding="utf-8")
 
 

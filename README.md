@@ -1,11 +1,11 @@
-# dev-coding-agent
+# devx-coding-agent
 
-`dev` is a **local-first, approval-gated AI coding agent** distributed as a Python package. It ships with two user interfaces:
+`devx` is a **local-first, approval-gated AI coding agent** distributed as a Python package. It ships with two user interfaces:
 
 - A **Textual TUI** for interactive coding sessions
 - A **Typer CLI** for one-shot commands and session management
 
-Under the hood, `dev` uses a **LangGraph supervisor workflow** (planner → coder → tester), approval-gated workspace tools, SQLite-backed session persistence, and supports any OpenAI-compatible or native LLM provider (OpenAI, Anthropic, Google, Azure, LiteLLM, Ollama, and more).
+Under the hood, `devx` uses a **LangGraph supervisor workflow** (planner → coder → tester), approval-gated workspace tools, SQLite-backed session persistence, and supports any OpenAI-compatible or native LLM provider (OpenAI, Anthropic, Google, Azure, LiteLLM, Ollama, and more).
 
 ---
 
@@ -78,13 +78,13 @@ Under the hood, `dev` uses a **LangGraph supervisor workflow** (planner → code
 
 ### Key Components
 
-- **`src/dev/agents/graph.py`** — LangGraph state graph builder; orchestrates planner, coder, and tester stages with conditional branching
-- **`src/dev/harness/tools.py`** — `WorkspaceTools`: read, write, replace, search, `git_diff`, and `run` (shell commands)
-- **`src/dev/harness/approval.py`** — `ApprovalManager` gates all mutations (writes, command execution)
-- **`src/dev/harness/session.py`** — `SessionStore` (SQLite CRUD + event log)
-- **`src/dev/harness/changes.py`** — `ChangeJournal` (atomic writes, backups, rollback support)
-- **`src/dev/tui/app.py`** — `DevTUI` (Textual app)
-- **`src/dev/cli/app.py`** — Typer CLI entrypoint
+- **`src/devx/agents/graph.py`** — LangGraph state graph builder; orchestrates planner, coder, and tester stages with conditional branching
+- **`src/devx/harness/tools.py`** — `WorkspaceTools`: read, write, replace, search, `git_diff`, and `run` (shell commands)
+- **`src/devx/harness/approval.py`** — `ApprovalManager` gates all mutations (writes, command execution)
+- **`src/devx/harness/session.py`** — `SessionStore` (SQLite CRUD + event log)
+- **`src/devx/harness/changes.py`** — `ChangeJournal` (atomic writes, backups, rollback support)
+- **`src/devx/tui/app.py`** — `DevxTUI` (Textual app)
+- **`src/devx/cli/app.py`** — Typer CLI entrypoint
 
 ---
 
@@ -116,91 +116,60 @@ pip install -e ".[agent,anthropic,google,embeddings,tracing,dev]"
 
 | Extra | Packages | Purpose |
 |---|---|---|
-| `agent` | langchain, langgraph, langgraph-checkpoint-sqlite, aiosqlite, langchain-openai | Core agent runtime and async SQLite checkpoints |
+| `agent` | langchain, langgraph, langgraph-checkpoint-sqlite, langchain-openai | Core agent runtime |
 | `tui` | textual | Textual TUI |
 | `cli` | typer | Typer CLI |
 | `openai` | langchain-openai | OpenAI provider |
 | `anthropic` | langchain-anthropic | Anthropic provider |
 | `google` | langchain-google-genai | Google provider |
 | `azure` | langchain-openai | Azure OpenAI provider |
-| `embeddings` | numpy, onnxruntime, transformers, sentence-transformers | Optional local embeddings |
+| `embeddings` | numpy, onnxruntime, transformers, sentence-transformers | Local ONNX embeddings |
 | `tracing` | langsmith | LangSmith tracing |
 | `dev` | pytest, pytest-cov, ruff, pyright | Development tools |
 | `all` | all of the above | Full installation |
-
-### Use `dev` from any directory during development
-
-For a machine-wide development command without installing into system Python,
-create a dedicated user virtual environment and install this repository in
-editable mode.
-
-Windows PowerShell:
-
-```powershell
-py -3.12 -m venv "$env:USERPROFILE\.venvs\dev-coding-agent"
-& "$env:USERPROFILE\.venvs\dev-coding-agent\Scripts\python.exe" `
-  -m pip install -c C:\Projects\dev\constraints.txt `
-  -e "C:\Projects\dev[agent,tui,cli,dev]"
-```
-
-Add `$env:USERPROFILE\.venvs\dev-coding-agent\Scripts` to the user `PATH`,
-restart the shell, and verify with `Get-Command dev`. Linux and macOS users
-should add `~/.venvs/dev-coding-agent/bin` to their shell `PATH`. This keeps
-the `dev` launcher globally available while source changes in the repository
-remain immediately active.
-
-For commands launched from other repositories, store provider settings in the
-user-wide `~/.dev/config.env` rather than relying on the repository-local
-`.env` file. On Windows this is `%USERPROFILE%\.dev\config.env`.
 
 ---
 
 ## Configuration
 
-`dev` loads configuration from a workspace **`.env`** file, **`~/.dev/config.env`** (if present), and environment variables. The precedence order is: environment variables > workspace `.env` > `config.env` > built-in defaults. Copy [`.env.example`](.env.example) to `.env` for local development; `.env` is ignored by Git.
+`devx` loads configuration from **`~/.devx/config.env`** (or legacy `~/.dev/config.env`) **and** environment variables. The precedence order is: environment variables > `config.env` > built-in defaults.
 
 ### Environment Variables
 
+Both `DEVX_*` and legacy `DEV_*` variable names are supported, with `DEVX_*` taking precedence.
+
 | Variable | Default | Description |
 |---|---|---|
-| `DEV_BASE_URL` | `http://localhost:4000/v1` | OpenAI-compatible API endpoint |
-| `DEV_API_KEY` | `sk-placeholder` | API key for the LLM provider |
-| `DEV_MODEL` | `gpt-4o` | Model name to use |
-| `DEV_PROVIDER` | `openai` | Provider: `openai`, `openrouter`, `anthropic`, `google`, `azure`, `ollama` |
-| `DEV_SESSION_DB` | `~/.dev/sessions.db` | SQLite session database path |
-| `DEV_CACHE_DB` | `~/.dev/cache.db` | Semantic cache database path |
-| `DEV_APPROVAL_REQUIRED` | `true` | Require approval for file writes and commands |
-| `DEV_MAX_ITERATIONS` | `8` | Maximum agent loop iterations per run |
-| `DEV_MAX_TOOL_CALLS` | `40` | Maximum tool calls per run |
-| `DEV_COMMAND_TIMEOUT` | `120` | Shell command timeout in seconds |
-| `DEV_TEST_COMMAND` | `""` (auto-detect) | Custom test command for tester agent |
-| `DEV_MAX_FILE_BYTES` | `1000000` | Maximum file size to read (bytes) |
-| `DEV_EMBEDDINGS_ENABLED` | `false` | Enable local ONNX embeddings for token optimization |
-| `DEV_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Local embedding model identifier |
-| `DEV_EMBEDDING_CACHE_DIR` | `~/.cache/dev/embeddings` | Local embedding model cache directory |
-| `DEV_EMBEDDINGS_OFFLINE` | `false` | Prevent embedding model downloads and use cached files only |
+| `DEVX_BASE_URL` | `http://localhost:4000/v1` | OpenAI-compatible API endpoint |
+| `DEVX_API_KEY` | `sk-placeholder` | API key for the LLM provider |
+| `DEVX_MODEL` | `gpt-4o` | Model name to use |
+| `DEVX_PROVIDER` | `openai` | Provider: `openai`, `anthropic`, `google`, `azure` |
+| `DEVX_WORKSPACE` | `cwd` (current working directory) | Workspace root directory |
+| `DEVX_SESSION_DB` | `~/.devx/sessions.db` | SQLite session database path |
+| `DEVX_CACHE_DB` | `~/.devx/cache.db` | Semantic cache database path |
+| `DEVX_APPROVAL_REQUIRED` | `true` | Require approval for file writes and commands |
+| `DEVX_MAX_ITERATIONS` | `8` | Maximum agent loop iterations per run |
+| `DEVX_MAX_TOOL_CALLS` | `40` | Maximum tool calls per run |
+| `DEVX_COMMAND_TIMEOUT` | `120` | Shell command timeout in seconds |
+| `DEVX_TEST_COMMAND` | `""` (auto-detect) | Custom test command for tester agent |
+| `DEVX_MAX_FILE_BYTES` | `1000000` | Maximum file size to read (bytes) |
+| `DEVX_EMBEDDINGS_ENABLED` | `false` | Enable local ONNX embeddings for token optimization |
 | `LANGSMITH_TRACING` | `false` | Enable LangSmith tracing |
 
-### Recommended OpenRouter `.env` or `~/.dev/config.env`
+### Example `~/.devx/config.env`
 
 ```env
-DEV_PROVIDER=openrouter
-DEV_BASE_URL=https://openrouter.ai/api/v1
-DEV_API_KEY=sk-or-v1-your-openrouter-key
-DEV_MODEL=poolside/laguna-s-2.1:free
-DEV_APPROVAL_REQUIRED=true
-DEV_TEST_COMMAND=pytest
-DEV_EMBEDDINGS_ENABLED=true
+DEVX_BASE_URL=https://api.openai.com/v1
+DEVX_API_KEY=sk-...
+DEVX_MODEL=gpt-4o
+DEVX_PROVIDER=openai
+DEVX_WORKSPACE=C:/Projects/my-project
+DEVX_APPROVAL_REQUIRED=true
+DEVX_TEST_COMMAND=pytest
+DEVX_EMBEDDINGS_ENABLED=true
 ```
 
-> **Note:** Quoted values and `export KEY=value` syntax are supported. Keep API keys only in `.env`, `~/.dev/config.env`, or your shell environment.
-
-The repository includes a ready-to-copy [`.env.example`](.env.example) for
-OpenRouter acceptance testing. The built-in defaults remain local-placeholder
-values so installing the package never makes an unexpected network request.
-The CLI always uses the current working directory as its workspace. Change
-directories before invoking `dev`; do not configure a fixed workspace path in
-`.env` or `~/.dev/config.env`.
+> **Note:** Quoted values are supported in `config.env`.
 
 ---
 
@@ -212,39 +181,36 @@ directories before invoking `dev`; do not configure a fixed workspace path in
    ```
 
 2. **Configure your provider:**
-   Set `DEV_BASE_URL`, `DEV_API_KEY`, and `DEV_MODEL`, copy `.env.example` to `.env`, or create `~/.dev/config.env`.
+   Set `DEVX_BASE_URL`, `DEVX_API_KEY`, and `DEVX_MODEL`, or create `~/.devx/config.env`.
 
 3. **Run the doctor check:**
    ```bash
-   dev doctor
+   devx doctor
    ```
 
 4. **Start coding:**
    ```bash
    # Interactive TUI
-   dev tui
+   devx tui
 
    # One-shot CLI
-   dev ask "inspect @src/app.py"
+   devx ask "inspect @src/app.py"
    ```
 
 ---
 
 ## CLI Usage
 
-The `dev` CLI exposes the following commands:
+The `devx` CLI exposes the following commands:
 
-Running `dev` without a subcommand starts the interactive TUI. The explicit
-`dev tui` form remains available, including its session option.
-
-### `dev ask`
+### `devx ask`
 
 Run a single agent task.
 
 ```bash
-dev ask "explain @src/main.py"
-dev ask --session my-project "fix the bug in @src/utils.py"
-dev ask --approve-all "run tests and fix failures"   # trusted workspaces only
+devx ask "explain @src/main.py"
+devx ask --session my-project "fix the bug in @src/utils.py"
+devx ask --approve-all "run tests and fix failures"   # trusted workspaces only
 ```
 
 | Option | Description |
@@ -252,86 +218,55 @@ dev ask --approve-all "run tests and fix failures"   # trusted workspaces only
 | `--session NAME` | Resume or create a named session |
 | `--approve-all` | Auto-approve all writes and commands (use only in trusted, isolated workspaces) |
 
-### `dev tui`
+### `devx tui`
 
 Launch the interactive Textual TUI.
 
 ```bash
-dev tui
+devx tui
 ```
 
-The TUI starts with the prompt focused. Slash commands and workspace file
-mentions provide ghost-text autocomplete; press the right arrow to accept a
-suggestion. Use `F1` for help, `Ctrl+L` to clear the conversation, and
-`Ctrl+C` to cancel an active agent run.
+### `devx doctor`
 
-Inside the TUI, provider and model settings can be managed with:
-
-```text
-/provider                    # show numbered providers
-/provider 2                  # select a provider by number
-/provider openrouter         # select by name
-/provider list
-/provider use openrouter
-/model                       # show numbered models
-/model free                  # show only free models
-/model tools                 # show tool-capable models
-/model 1                     # select a displayed model
-/model list
-/model use poolside/laguna-s-2.1:free
-/api-key set
-/config show
-/config reload
-```
-
-API-key entry is masked and stored in the user-wide configuration file. Keys
-are not added to session messages or event history.
-
-### `dev doctor`
-
-Run a diagnostic check to verify configuration and optional dependencies. Use
-`dev ask` for a live provider connectivity check.
+Run a diagnostic check to verify configuration, provider connectivity, and dependencies.
 
 ```bash
-dev doctor
+devx doctor
 ```
 
-### `dev sessions`
+### `devx sessions`
 
 List all sessions.
 
 ```bash
-dev sessions
-dev session rename local-dev renamed-session
-dev session export local-dev ./local-dev-session.json
-dev session import ./local-dev-session.json imported-session
+devx sessions
 ```
 
-### `dev session list`
+### `devx session list`
 
-Alias for `dev sessions`.
+Alias for `devx sessions`.
 
-### `dev session events <ID>`
+### `devx session events <ID>`
 
 Show event history for a specific session.
 
 ```bash
-dev session events abc123
+devx session events abc123
 ```
 
-### `dev session delete <ID>`
+### `devx session delete <ID>`
 
 Delete a session and its events.
 
 ```bash
-dev session delete abc123
+devx session delete abc123
 ```
 
 ---
 
 ## TUI Usage
 
-Launch the TUI with `dev tui`.
+Launch the TUI with `devx tui`.
 
 ### Features
 
@@ -352,13 +287,7 @@ Launch the TUI with `dev tui`.
 | `/approve` | Approve a pending write or command |
 | `/reject` | Reject a pending write or command |
 | `/clear` | Clear the current conversation |
-| `/copy` | Copy the selected transcript text, or the full transcript if nothing is selected |
 | `/help` | Show help for available commands |
-
-Select transcript text with the terminal mouse or Textual keyboard selection,
-then press `F2`, `Ctrl+Insert`, `Ctrl+Shift+C`, or run `/copy`. `Ctrl+C` also
-copies when the transcript selection is focused; otherwise it cancels the
-active run. If there is no selection, the full transcript is copied.
 
 > **Note:** The command set is minimal by design. Additional commands may be added in future releases.
 
@@ -366,18 +295,17 @@ active run. If there is no selection, the full transcript is copied.
 
 ## Supported Providers
 
-`dev` supports any OpenAI-compatible endpoint or native provider:
+`devx` supports any OpenAI-compatible endpoint or native provider:
 
 | Provider | Configuration |
 |---|---|
-| **OpenAI** | `DEV_PROVIDER=openai`, `DEV_BASE_URL=https://api.openai.com/v1` |
-| **OpenRouter** | `DEV_PROVIDER=openrouter`, `DEV_BASE_URL=https://openrouter.ai/api/v1`, `DEV_MODEL=poolside/laguna-s-2.1:free` |
-| **Anthropic** | `DEV_PROVIDER=anthropic`, `DEV_BASE_URL=https://api.anthropic.com` |
-| **Google** | `DEV_PROVIDER=google` |
-| **Azure OpenAI** | `DEV_PROVIDER=azure`, `DEV_BASE_URL=https://<resource>.openai.azure.com` |
-| **LiteLLM** | `DEV_PROVIDER=openai`, `DEV_BASE_URL=http://localhost:4000/v1` |
-| **Ollama** | `DEV_PROVIDER=ollama`, `DEV_BASE_URL=http://localhost:11434/v1` |
-| **vLLM / any compatible** | `DEV_PROVIDER=openai`, `DEV_BASE_URL=<your-endpoint>` |
+| **OpenAI** | `DEVX_PROVIDER=openai`, `DEVX_BASE_URL=https://api.openai.com/v1` |
+| **Anthropic** | `DEVX_PROVIDER=anthropic`, `DEVX_BASE_URL=https://api.anthropic.com` |
+| **Google** | `DEVX_PROVIDER=google` |
+| **Azure OpenAI** | `DEVX_PROVIDER=azure`, `DEVX_BASE_URL=https://<resource>.openai.azure.com` |
+| **LiteLLM** | `DEVX_PROVIDER=openai`, `DEVX_BASE_URL=http://localhost:4000/v1` |
+| **Ollama** | `DEVX_PROVIDER=openai`, `DEVX_BASE_URL=http://localhost:11434/v1` |
+| **vLLM / any compatible** | `DEVX_PROVIDER=openai`, `DEVX_BASE_URL=<your-endpoint>` |
 
 Tool calling support is required for the agent harness to function correctly.
 
@@ -385,9 +313,9 @@ Tool calling support is required for the agent harness to function correctly.
 
 ## Security
 
-By default, `dev` is designed with a security-first approach:
+By default, `devx` is designed with a security-first approach:
 
-- **Approval required** — All file writes and shell commands require explicit user approval (`DEV_APPROVAL_REQUIRED=true` by default)
+- **Approval required** — All file writes and shell commands require explicit user approval (`DEVX_APPROVAL_REQUIRED=true` by default)
 - **Workspace sandboxing** — All file operations are resolved relative to the configured workspace; paths outside the workspace are rejected
 - **Atomic writes** — File writes are atomic with automatic backups and before/after hashes
 - **No auto-commits** — The agent never commits Git changes automatically; inspect diffs and commit yourself
@@ -404,8 +332,8 @@ For more details, see [SECURITY.md](SECURITY.md).
 ### Clone the repository
 
 ```bash
-git clone https://github.com/your-org/dev-coding-agent.git
-cd dev-coding-agent
+git clone https://github.com/your-org/devx-coding-agent.git
+cd devx
 ```
 
 ### Install in development mode
@@ -417,13 +345,13 @@ pip install -e ".[agent,tui,cli,dev]"
 ### Run the TUI
 
 ```bash
-dev tui
+devx tui
 ```
 
 ### Run the CLI
 
 ```bash
-dev ask "hello world"
+devx ask "hello world"
 ```
 
 ---
@@ -442,7 +370,7 @@ The test configuration is defined in `pyproject.toml`:
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 ```
 
 ### Lint and format

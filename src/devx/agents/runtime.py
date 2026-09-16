@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from dev.harness.tools import WorkspaceTools
-from dev.llm import create_llm
+from devx.harness.tools import WorkspaceTools
+from devx.llm import create_llm
 
 
 class AgentDependencyError(RuntimeError):
@@ -17,7 +17,7 @@ def build_coding_agent(settings: Any, tools: WorkspaceTools, approve: Callable[[
         from langchain.agents import create_agent
         from langchain.tools import tool
     except ImportError as exc:
-        raise AgentDependencyError("Install the agent extra: pip install 'dev-coding-agent[agent]'") from exc
+        raise AgentDependencyError("Install the agent extra: pip install 'devx-coding-agent[agent]'") from exc
 
     def allowed(action: str, target: str, reason: str = "") -> bool:
         return bool(approve and approve(action, target, reason))

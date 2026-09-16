@@ -5,7 +5,13 @@ from pathlib import Path
 try:
     from prompt_toolkit.completion import Completer, Completion
 except ImportError:  # pragma: no cover
-    Completer = object
+    Completer = object  # type: ignore[misc,assignment]
+
+    class Completion:  # type: ignore[no-redef]
+        def __init__(self, text: str, start_position: int = 0, display: str | None = None):
+            self.text = text
+            self.start_position = start_position
+            self.display = display or text
 
 
 class FilePathCompleter(Completer):
@@ -27,7 +33,17 @@ class FilePathCompleter(Completer):
         if not base.is_dir():
             return
         prefix = query.rsplit("/", 1)[0] + "/" if "/" in query else ""
+        IGNORED_NAMES = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
+        count = 0
         for item in sorted(base.iterdir(), key=lambda p: p.name.lower()):
+            if not partial.startswith("."):
+                if item.name.startswith(".") or item.name in IGNORED_NAMES:
+                    continue
+            elif item.name in IGNORED_NAMES:
+                continue
             if partial.lower() in item.name.lower():
                 display = "@" + prefix + item.name + ("/" if item.is_dir() else "")
                 yield Completion(display, start_position=-len(token))
+                count += 1
+                if count >= self.limit:
+                    break

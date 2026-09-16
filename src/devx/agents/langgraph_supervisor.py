@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-from dev.agents.runtime import build_coding_agent, response_text, stream_agent_text
-from dev.harness.approval import ApprovalManager
-from dev.harness.changes import ChangeJournal
-from dev.harness.permissions import PermissionPolicy
-from dev.harness.runtime import CancellationToken
-from dev.harness.session import SessionStore
-from dev.harness.testing import detect_test_command
-from dev.harness.tools import WorkspaceTools
-from dev.llm import create_llm, invoke_with_retry
-from dev.token_optim.context import read_context
+from devx.agents.runtime import build_coding_agent, response_text, stream_agent_text
+from devx.harness.approval import ApprovalManager
+from devx.harness.changes import ChangeJournal
+from devx.harness.permissions import PermissionPolicy
+from devx.harness.runtime import CancellationToken
+from devx.harness.session import SessionStore
+from devx.harness.testing import detect_test_command
+from devx.harness.tools import WorkspaceTools
+from devx.llm import create_llm, invoke_with_retry
+from devx.token_optim.context import read_context
 
 
 class GraphState(TypedDict, total=False):

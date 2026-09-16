@@ -2,15 +2,17 @@ from pathlib import Path
 
 import pytest
 
-from dev.agents.graph import build_dev_graph
-from dev.completion.parser import parse_file_mentions
-from dev.config import Settings
-from dev.harness.approval import ApprovalDecision, ApprovalManager, ApprovalRequest
-from dev.harness.permissions import PermissionError, PermissionPolicy
-from dev.harness.session import SessionStore
-from dev.harness.tools import WorkspaceTools
-from dev.token_optim.cache import fingerprint_files
-from dev.token_optim.context import read_context, select_relevant_files
+from devx.agents.graph import DevState, DevxState, build_dev_graph, build_devx_graph
+from devx.completion.file_path import FilePathCompleter
+from devx.completion.parser import parse_file_mentions
+from devx.config import Settings
+from devx.harness.approval import ApprovalDecision, ApprovalManager, ApprovalRequest
+from devx.harness.changes import ChangeJournal
+from devx.harness.permissions import PermissionError, PermissionPolicy
+from devx.harness.session import SessionStore
+from devx.harness.tools import WorkspaceTools
+from devx.token_optim.cache import SemanticCache, fingerprint_files
+from devx.token_optim.context import read_context, select_relevant_files
 
 
 def test_mentions_resolve_and_report_missing(tmp_path: Path):
@@ -45,7 +47,7 @@ def test_replace_requires_unique_match_and_expected_hash(tmp_path: Path):
     tools = WorkspaceTools(PermissionPolicy(tmp_path), timeout=2)
     assert not tools.replace(path, "one", "two", approved=True).ok
     path.write_text("one\n")
-    from dev.harness.changes import file_hash
+    from devx.harness.changes import file_hash
     assert tools.replace(path, "one", "two", expected_hash="stale", approved=True).ok is False
     assert tools.replace(path, "one", "two", expected_hash=file_hash(path), approved=True).ok
 
@@ -78,6 +80,8 @@ def test_settings_load_uses_runtime_default_paths():
     settings = Settings.load(workspace=Path.cwd())
     assert settings.session_db.name == "sessions.db"
     assert settings.cache_db.name == "cache.db"
+    assert settings.session_db.parent.name == ".devx"
+    assert settings.cache_db.parent.name == ".devx"
 
 
 def test_cli_workspace_is_always_current_directory(tmp_path: Path, monkeypatch):
@@ -128,9 +132,12 @@ def test_sessions_can_rename_export_and_import(tmp_path: Path):
 
 
 def test_graph_has_bounded_result():
-    result = build_dev_graph(max_iterations=1).invoke({"task": "test"})
+    result = build_devx_graph(max_iterations=1).invoke({"task": "test"})
     assert result["status"] == "completed"
     assert result["messages"][-1]["role"] == "assistant"
+    compat = build_dev_graph(max_iterations=1).invoke(DevState(task="test"))
+    assert compat["status"] == "completed"
+    assert DevState is DevxState
 
 
 def test_context_is_bounded_and_deterministic(tmp_path: Path):
@@ -141,3 +148,120 @@ def test_context_is_bounded_and_deterministic(tmp_path: Path):
     assert len(select_relevant_files("one", paths, max_files=2)) == 2
     context = read_context(paths, max_total_bytes=10)
     assert len(context.encode("utf-8")) <= 10
+
+
+def test_context_selection_with_embedder_list_scores(tmp_path: Path):
+    f1 = tmp_path / "apple.py"
+    f1.write_text("apple fruit")
+    f2 = tmp_path / "orange.py"
+    f2.write_text("orange citrus")
+
+    class FakeEmbedder:
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            results = []
+            for t in texts:
+                results.append([1.0 if "apple" in t else 0.0, 1.0 if "orange" in t else 0.0])
+            return results
+
+    selected = select_relevant_files("apple", [f1, f2], max_files=1, embedder=FakeEmbedder())
+    assert selected == [f1]
+
+
+def test_rollback_preserves_backup_file(tmp_path: Path):
+    journal = ChangeJournal(tmp_path / "changes.db")
+    target = tmp_path / "file.txt"
+    target.write_text("v1")
+    tools = WorkspaceTools(PermissionPolicy(tmp_path), journal=journal, run_id="run1", timeout=2)
+    tools.write("file.txt", "v2", approved=True)
+    assert target.read_text() == "v2"
+
+    backup_dir = tmp_path / "backups" / "run1"
+    backups = list(backup_dir.glob("*.v1*")) or list(backup_dir.iterdir())
+    assert len(backups) == 1
+    backup_file = backups[0]
+    assert backup_file.exists()
+
+    restored = journal.rollback("run1")
+    assert str(target) in restored
+    assert target.read_text() == "v1"
+    assert backup_file.exists()
+
+
+def test_sqlite_wal_and_concurrency(tmp_path: Path):
+    store = SessionStore(tmp_path / "sessions.db")
+    with store._connect() as conn:
+        mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
+        timeout = conn.execute("PRAGMA busy_timeout;").fetchone()[0]
+        assert mode.lower() == "wal"
+        assert timeout == 5000
+
+    journal = ChangeJournal(tmp_path / "changes.db")
+    with journal._connect() as conn:
+        mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
+        timeout = conn.execute("PRAGMA busy_timeout;").fetchone()[0]
+        assert mode.lower() == "wal"
+        assert timeout == 5000
+
+    cache = SemanticCache(tmp_path / "cache.db")
+    with cache._connect() as conn:
+        mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
+        timeout = conn.execute("PRAGMA busy_timeout;").fetchone()[0]
+        assert mode.lower() == "wal"
+        assert timeout == 5000
+
+
+def test_write_cleans_up_tmp_file_on_failure(tmp_path: Path, monkeypatch):
+    tools = WorkspaceTools(PermissionPolicy(tmp_path), timeout=2)
+    target = tmp_path / "target.txt"
+
+    def fail_replace(self, dest):
+        raise OSError("Simulated replace disk failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    res = tools.write(target, "fail content", approved=True)
+    assert not res.ok
+    assert not (tmp_path / ".target.txt.devx-tmp").exists()
+
+
+def test_file_path_completion_filters_clutter(tmp_path: Path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / ".env").write_text("SECRET=1")
+    (tmp_path / "main.py").write_text("print(1)")
+
+    class DummyDoc:
+        def __init__(self, text):
+            self.text_before_cursor = text
+
+    completer = FilePathCompleter(workspace=tmp_path, limit=10)
+    completions = [c.text for c in completer.get_completions(DummyDoc("@"), None)]
+    assert "@main.py" in completions
+    assert "@.git/" not in completions
+    assert "@node_modules/" not in completions
+    assert "@__pycache__/" not in completions
+    assert "@.env" not in completions
+
+    dot_completions = [c.text for c in completer.get_completions(DummyDoc("@."), None)]
+    assert "@.env" in dot_completions
+    assert "@.git/" not in dot_completions
+
+
+def test_permission_policy_allows_safe_subcommand_flags(tmp_path: Path):
+    policy = PermissionPolicy(tmp_path, approval_required=False)
+    assert policy.command(["pytest", "-k", "rm"]) == ["pytest", "-k", "rm"]
+    assert policy.command(["ruff", "format"]) == ["ruff", "format"]
+    assert policy.command("pytest -k rm") == ["pytest", "-k", "rm"]
+
+    with pytest.raises(PermissionError, match="Destructive command"):
+        policy.command(["rm", "-rf", "."])
+
+    with pytest.raises(PermissionError, match="Destructive command"):
+        policy.command("rm -rf .")
+
+    with pytest.raises(PermissionError, match="Destructive command"):
+        policy.command(["sh", "-c", "rm -rf ."])
+
+    with pytest.raises(PermissionError, match="System-level command"):
+        policy.command(["format", "C:"])
+

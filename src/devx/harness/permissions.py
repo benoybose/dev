@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +15,35 @@ class Approval:
     action: str
     target: str
     reason: str
+
+
+SYSTEM_COMMANDS = {"format", "diskpart", "cipher", "takeown", "icacls"}
+DESTRUCTIVE_COMMANDS = {"del", "erase", "rm", "rmdir", "remove-item", "shutdown", "reboot"}
+CHAIN_OPERATORS = {"&&", "||", ";", "|", "&"}
+SHELL_FLAGS = {"-c", "/c", "/k", "-command"}
+
+
+def _get_command_verbs(args: list[str]) -> list[str]:
+    verbs: list[str] = []
+    expect_verb = True
+    for i, token in enumerate(args):
+        cleaned = token.strip("\"'")
+        if not cleaned:
+            continue
+        if expect_verb:
+            cmd = Path(cleaned).name.lower().removesuffix(".exe")
+            verbs.append(cmd)
+            expect_verb = False
+        elif cleaned in CHAIN_OPERATORS or cleaned.lower() == "sudo":
+            expect_verb = True
+        elif cleaned.lower() in SHELL_FLAGS and i + 1 < len(args):
+            sub_str = args[i + 1].strip("\"'")
+            try:
+                sub_args = shlex.split(sub_str, posix=os.name != "nt")
+            except ValueError:
+                sub_args = sub_str.split()
+            verbs.extend(_get_command_verbs(sub_args))
+    return verbs
 
 
 class PermissionPolicy:
@@ -40,9 +68,10 @@ class PermissionPolicy:
         args = shlex.split(command, posix=os.name != "nt") if isinstance(command, str) else list(command)
         if not args:
             raise PermissionError("Empty command")
-        if any(re.search(r"(?i)(^|[/\\])(?:format|diskpart|cipher|takeown|icacls)$", arg) for arg in args):
+        verbs = _get_command_verbs(args)
+        if any(v in SYSTEM_COMMANDS for v in verbs):
             raise PermissionError("System-level command is not permitted")
-        if any(re.search(r"(?i)(^|\s)(del|erase|rm|rmdir|remove-item|shutdown|reboot)(\s|$)", arg) for arg in args):
+        if any(v in DESTRUCTIVE_COMMANDS for v in verbs):
             raise PermissionError("Destructive command is not permitted")
         if self.approval_required and not approved:
             raise PermissionError("Command requires explicit approval")

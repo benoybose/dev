@@ -1,13 +1,8 @@
-# `dev`: A Detailed Blueprint for Building an AI Coding Agent as a Local TUI and CLI
+# `devx`: A Detailed Blueprint for Building an AI Coding Agent as a Local TUI and CLI
 
 ## Executive Summary
 
-`dev` is a locally installed AI coding agent that works with any OpenAI-compatible inference API (including tool calling). It uses **LangChain** and **LangGraph** for the agentic harness, **Textual** for the terminal UI, **Typer** for the CLI entrypoint, and local embeddings for client-side token optimization. Users reference files and directories with `@` mentions and control sessions and agents with a minimal set of slash commands.
-
-This document is both an architectural target and an implementation guide.
-The production path currently uses a planner → coder → tester LangGraph with a
-bounded tester-to-coder repair loop. Features explicitly marked in the roadmap
-as post-release remain planned extensions rather than guaranteed behavior.
+`devx` is a locally installed AI coding agent that works with any OpenAI-compatible inference API (including tool calling). It uses **LangChain** and **LangGraph** for the agentic harness, **Textual** for the terminal UI, **Typer** for the CLI entrypoint, and local embeddings for client-side token optimization. Users reference files and directories with `@` mentions and control sessions and agents with a minimal set of slash commands.
 
 ---
 
@@ -63,19 +58,17 @@ as post-release remain planned extensions rather than guaranteed behavior.
 
 **LangGraph over a simple AgentExecutor**: Coding tasks require multi-step state management (read file → analyze → edit → test → fix). LangGraph provides an explicit state machine with conditional branching, loops, and interrupt/resume. Multi-agent patterns (Supervisor / Swarm) are production-proven.
 
-**Local embeddings for token optimization**: The current optional wrapper uses
-`sentence-transformers/all-MiniLM-L6-v2` on CPU. The key advantage is **zero
-API calls** — embedding computation consumes no inference tokens.
+**Local embeddings for token optimization**: Quantized INT8 models like `intelli-embed-v2` run on CPU at roughly 10ms per embedding and achieve ~98% of Azure text-embedding-3-small quality. The key advantage: **zero API calls** — embedding computation consumes no inference tokens.
 
 ---
 
 ## 3. Project Structure
 
 ```
-dev/
+devx/
 ├── pyproject.toml
 ├── README.md
-├── src/dev/
+├── src/devx/
 │   ├── __init__.py
 │   ├── main.py                 # Entry: TUI or CLI
 │   ├── config.py               # Env vars, API endpoint config
@@ -127,7 +120,7 @@ dev/
 
 ### 4.1 Model Abstraction: Any OpenAI-Compatible API
 
-`dev` is not bound to any provider. Users specify the endpoint via environment variables or a config file:
+`devx` is not bound to any provider. Users specify the endpoint via environment variables or a config file:
 
 ```python
 # config.py
@@ -136,9 +129,9 @@ from langchain_openai import ChatOpenAI
 
 def create_llm() -> ChatOpenAI:
     """Create a ChatOpenAI instance pointing at any OpenAI-compatible endpoint."""
-    base_url = os.getenv("DEV_BASE_URL", "http://localhost:4000/v1")
-    api_key = os.getenv("DEV_API_KEY", "sk-placeholder")
-    model = os.getenv("DEV_MODEL", "gpt-4o")
+    base_url = os.getenv("DEVX_BASE_URL", os.getenv("DEV_BASE_URL", "http://localhost:4000/v1"))
+    api_key = os.getenv("DEVX_API_KEY", os.getenv("DEV_API_KEY", "sk-placeholder"))
+    model = os.getenv("DEVX_MODEL", os.getenv("DEV_MODEL", "gpt-4o"))
 
     return ChatOpenAI(
         model=model,
@@ -153,12 +146,12 @@ def create_llm() -> ChatOpenAI:
 
 ```bash
 litellm --config litellm_config.yaml --port 4000
-export DEV_BASE_URL=http://localhost:4000
-export DEV_API_KEY=sk-your-master-key
-export DEV_MODEL=gpt-4o  # Must match model_name in the LiteLLM config
+export DEVX_BASE_URL=http://localhost:4000
+export DEVX_API_KEY=sk-your-master-key
+export DEVX_MODEL=gpt-4o  # Must match model_name in the LiteLLM config
 ```
 
-**Key constraint**: `DEV_MODEL` must match the `model_name` alias in the LiteLLM config, not the upstream raw model name.
+**Key constraint**: `DEVX_MODEL` must match the `model_name` alias in the LiteLLM config, not the upstream raw model name.
 
 ### 4.2 Agentic Harness (Multi-Agent Coordination)
 
@@ -169,16 +162,19 @@ Choose the **Supervisor pattern** because coding tasks require centralized contr
 from langgraph.graph import StateGraph, END
 from typing import Literal, TypedDict
 
-class DevState(TypedDict):
+class DevxState(TypedDict):
     messages: list
     task: str
     active_agent: str
     files_in_context: list[str]
     token_count: int
 
-def build_dev_graph():
+# Backwards-compatibility alias
+DevState = DevxState
+
+def build_devx_graph():
     """Build the supervisor-subagent state graph."""
-    workflow = StateGraph(DevState)
+    workflow = StateGraph(DevxState)
 
     # Nodes
     workflow.add_node("supervisor", supervisor_node)
@@ -207,30 +203,26 @@ def build_dev_graph():
         workflow.add_edge(agent, "supervisor")
 
     return workflow.compile()
+
+build_dev_graph = build_devx_graph
 ```
 
 **Supervisor routing logic**:
 
 ```python
-def supervisor_node(state: DevState) -> DevState:
+def supervisor_node(state: DevxState) -> DevxState:
     """Supervisor decides which agent to delegate to next."""
     # Use an LLM to analyze the current state and task
     # Return an active_agent update
     ...
 
-def route_from_supervisor(state: DevState) -> Literal[
+def route_from_supervisor(state: DevxState) -> Literal[
     "planner", "coder", "tester", "doc_writer", "FINISH"
 ]:
     return state["active_agent"]
 ```
 
 **Performance trade-off**: The supervisor pattern adds one extra model call (results must be summarized by the supervisor) compared to a simple single-agent setup, but it provides centralized control. For a coding agent, that overhead is worth it because the supervisor maintains a global view of files.
-
-**Current implementation note**: The durable graph currently implements the
-planner, coder, and tester stages directly. Failed tests can route back to the
-coder for at most two repairs, subject to the configured iteration budget.
-The `doc_writer` and fully LLM-routed supervisor shown above remain extension
-points.
 
 ### 4.3 Session Handling and Concurrent Agents
 
@@ -243,7 +235,7 @@ import json
 from pathlib import Path
 
 class SessionStore:
-    def __init__(self, db_path: Path = Path.home() / ".dev" / "sessions.db"):
+    def __init__(self, db_path: Path = Path.home() / ".devx" / "sessions.db"):
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -256,7 +248,7 @@ class SessionStore:
                     name TEXT,
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP,
-                    state TEXT,  -- JSON-serialized DevState
+                    state TEXT,  -- JSON-serialized DevxState
                     metadata TEXT
                 )
             """)
@@ -274,11 +266,11 @@ class SessionStore:
         ...
 ```
 
-**Concurrent agents**: Different sessions can run different agent-graph instances simultaneously. Each `dev` process maintains its own `SessionStore` connection and LangGraph state. For parallel agents (e.g., running coder and tester at the same time), use Python `asyncio`:
+**Concurrent agents**: Different sessions can run different agent-graph instances simultaneously. Each `devx` process maintains its own `SessionStore` connection and LangGraph state. For parallel agents (e.g., running coder and tester at the same time), use Python `asyncio`:
 
 ```python
 # Run multiple agent tasks in parallel
-async def run_parallel_agents(agents: list, state: DevState):
+async def run_parallel_agents(agents: list, state: DevxState):
     tasks = [agent.ainvoke(state) for agent in agents]
     results = await asyncio.gather(*tasks)
     return results
@@ -291,15 +283,15 @@ async def run_parallel_agents(agents: list, state: DevState):
 ```python
 # cli/app.py
 import typer
-from dev.tui.app import DevTUI
-from dev.harness.session import SessionStore
+from devx.tui.app import DevxTUI
+from devx.harness.session import SessionStore
 
-app = typer.Typer(help="dev - AI coding agent", no_args_is_help=False)
+app = typer.Typer(help="devx - AI coding agent", no_args_is_help=False)
 
 @app.command()
 def tui(session: str = typer.Option(None, "--session", "-s")):
     """Launch the TUI interface."""
-    tui_app = DevTUI(session_id=session)
+    tui_app = DevxTUI(session_id=session)
     tui_app.run()
 
 @app.command()
@@ -318,7 +310,7 @@ if __name__ == "__main__":
     app()
 ```
 
-Users launch the interactive interface with `dev` (or the explicit `dev tui`), or run a one-shot query with `dev ask "fix the login bug"`.
+Users launch the interactive interface with `devx tui`, or run a one-shot query with `devx ask "fix the login bug"`.
 
 **Textual TUI structure**:
 
@@ -327,8 +319,9 @@ Users launch the interactive interface with `dev` (or the explicit `dev tui`), o
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Static, Input, RichLog
+from devx.agents.graph import build_devx_graph
 
-class DevTUI(App):
+class DevxTUI(App):
     CSS_PATH = "styles.tcss"
 
     def compose(self) -> ComposeResult:
@@ -345,7 +338,7 @@ class DevTUI(App):
 
     async def _invoke_agent(self, text: str, files: list):
         """Run LangGraph inside a background worker."""
-        graph = build_dev_graph()
+        graph = build_devx_graph()
         result = await graph.ainvoke({...})
         self.query_one("#chat-view").write(result["messages"][-1].content)
 ```
@@ -438,10 +431,6 @@ def parse_file_mentions(text: str) -> tuple[str, list[Path]]:
 
 **Local embedding configuration**:
 
-The current implementation supports an explicit model cache and offline mode
-through `DEV_EMBEDDING_CACHE_DIR` and `DEV_EMBEDDINGS_OFFLINE`. The ONNX
-implementation below is a future optimization variant.
-
 ```python
 # token_optim/embeddings.py
 import onnxruntime as ort
@@ -480,10 +469,10 @@ class LocalEmbedder:
 import sqlite3
 import numpy as np
 from pathlib import Path
-from dev.token_optim.embeddings import LocalEmbedder
+from devx.token_optim.embeddings import LocalEmbedder
 
 class SemanticCache:
-    def __init__(self, db_path: str = "~/.dev/cache.db", threshold: float = 0.95):
+    def __init__(self, db_path: str = "~/.devx/cache.db", threshold: float = 0.95):
         self.db_path = Path(db_path).expanduser()
         self.threshold = threshold
         self.embedder = LocalEmbedder()
@@ -530,7 +519,7 @@ class SemanticCache:
 # token_optim/context.py
 import numpy as np
 from pathlib import Path
-from dev.token_optim.embeddings import LocalEmbedder
+from devx.token_optim.embeddings import LocalEmbedder
 
 def select_relevant_files(
     query: str,
@@ -562,34 +551,19 @@ def select_relevant_files(
 
 **Expected token savings**: Local embedding computation uses zero API tokens. Semantic caching saves 100% of inference tokens on repeated queries. Intelligent file selection can reduce large-project context by 60-80%. The combined effect depends on usage patterns, but client-side embedding is pure upside — it only costs local CPU time (~10ms per embedding).
 
-### 4.7 Slash Commands
+### 4.7 Minimal Slash Commands
 
-The TUI provides session, agent, execution, and provider configuration commands:
+Following the "sufficient and minimal" principle, keep only 5 core commands:
 
 | Command | Purpose | Implementation |
 |---|---|---|
 | `/help` | Show available commands and usage | Static text |
 | `/session` | List, switch, and name sessions | Calls `SessionStore` |
-| `/provider list` | List supported provider aliases | Static provider registry |
-| `/provider use NAME` | Select a provider and its default endpoint | Updates user config |
-| `/model list` | Discover models from an OpenAI-compatible endpoint | Provider `/models` API |
-| `/model use ID` | Select the model for new runs | Updates user config |
-| `/api-key set` | Enter a masked API key | Updates user config securely |
-| `/config show` | Show active settings with a masked key | Reads `Settings` |
-| `/config reload` | Reload and display configuration | Reads `Settings` |
-| `/copy` | Copy selected transcript text or the full transcript | Native clipboard command |
-| `/agent` | Select a requested specialist perspective | Updates run state |
+| `/agent` | Switch active agent (coder/planner/tester/docs) | Mutates `DevxState.active_agent` |
 | `/clear` | Clear current session context | Resets the `messages` list |
-| `/cancel` | Cancel the active run | Signals cancellation token |
-| `/rollback` | Restore safe changes from the current run | Calls `ChangeJournal` |
 | `/exit` | Quit the TUI | Triggers Textual `action_quit` |
 
-Provider and model commands never write API keys to session messages or event
-history. `/api-key set` uses a masked input, and `/config show` masks the
-configured key. OpenRouter and Ollama are provider aliases backed by the
-OpenAI-compatible adapter.
-
-Intercept input beginning with `/` in the TUI's `Input` widget:
+Interceptors handle input beginning with `/` in the TUI's `Input` widget:
 
 ```python
 def on_input_submitted(self, event: Input.Submitted):
@@ -628,50 +602,38 @@ def _handle_slash_command(self, cmd: str):
 
 ```bash
 # From source
-git clone https://github.com/your-org/dev.git
-cd dev
+git clone https://github.com/your-org/devx-coding-agent.git
+cd devx
 pip install -e .
 
 # Or from PyPI
-pip install dev-coding-agent
+pip install devx-coding-agent
 ```
-
-For repository development, create a user virtual environment and install the
-checkout in editable mode. Add its `bin` directory on Linux/macOS or `Scripts`
-directory on Windows to the user `PATH` to make `dev` available from any
-working directory. Keep provider credentials in `~/.dev/config.env` when
-working across multiple repositories; use the repository `.env` for
-workspace-specific settings.
 
 ### Configuration
 
-Set the following in `.env`, `~/.dev/config.env`, or your shell environment.
-For OpenRouter, use the OpenAI-compatible provider adapter:
+Set the following in `~/.devx/config.env` (or `~/.dev/config.env`) or your shell environment:
 
 ```bash
-export DEV_PROVIDER="openrouter"
-export DEV_BASE_URL="https://openrouter.ai/api/v1"
-export DEV_API_KEY="sk-or-v1-..."
-export DEV_MODEL="poolside/laguna-s-2.1:free"
+export DEVX_BASE_URL="https://your-litellm-proxy.com/v1"
+export DEVX_API_KEY="sk-..."
+export DEVX_MODEL="claude-sonnet-4"  # or any LiteLLM alias
 ```
-
-The tracked `.env.example` contains the same OpenRouter acceptance profile.
-Never commit the real `.env` file or an API key.
 
 ### Usage
 
 ```bash
 # Launch the TUI
-dev tui
+devx tui
 
 # Launch the TUI with a named session
-dev tui --session "auth-bug-fix"
+devx tui --session "auth-bug-fix"
 
 # One-shot CLI query
-dev ask "Fix the login validation logic in @src/auth.py"
+devx ask "Fix the login validation logic in @src/auth.py"
 
 # List sessions
-dev sessions
+devx sessions
 ```
 
 ---
@@ -683,7 +645,7 @@ dev sessions
 | Agent orchestration | LangGraph Supervisor | Coding tasks require centralized file-state management; production-proven |
 | TUI framework | Textual | Async worker model fits long-running agents; rich layout system |
 | CLI framework | Typer | Clean command registration; automatic help text |
-| Local embeddings | sentence-transformers/all-MiniLM-L6-v2 | CPU-local, optional, cacheable, and zero API calls |
+| Local embeddings | intelli-embed-v2 (ONNX INT8) | ~10ms per embedding on CPU; zero API calls; ~98% of Azure quality |
 | Model interface | ChatOpenAI with base_url | Any OpenAI-compatible endpoint; 100+ providers via LiteLLM |
 | `@` completion | prompt_toolkit Completer | Mature fuzzy matching; avoid the `@staticmethod` crash pitfall |
 | Session storage | SQLite | Zero configuration; supports concurrent sessions; easy to query |
@@ -693,7 +655,7 @@ dev sessions
 ## 7. Extension Directions
 
 1. **Git integration**: Agent automatically diffs and commits after edits; `@diff` mention for review.
-2. **Richer test-runner agent**: Expand the bounded repair loop with project-specific diagnostics and policies.
+2. **Test-runner agent**: Automatically runs pytest after code edits and triggers a fix loop on failure.
 3. **Project memory**: Embed `AGENTS.md` and code conventions into a local vector store; the agent auto-loads relevant memory at startup.
 4. **Sandboxed execution**: For untrusted generated code, run tests in a subprocess with restricted filesystem write access.
 5. **Streaming tool calls**: Stream tool-call deltas to the TUI for a more responsive feel on long edits.

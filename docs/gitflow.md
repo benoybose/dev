@@ -12,7 +12,7 @@ The repository uses GitFlow-style branches with semantic versioning managed by
 | `hotfix/X.Y.Z` | Set the exact patch version | `hotfix/1.2.1` → `1.2.1` |
 | `main` | Preserve the stable version merged from release/hotfix | `1.2.0` |
 
-The version workflow updates both `pyproject.toml` and `src/dev/__init__.py`.
+The version workflow updates both `pyproject.toml` and `src/devx/__init__.py`.
 It commits changes as the GitHub Actions bot with `[skip ci]` to avoid a loop.
 The workflow only runs automatically for `develop`, `release/*`, and
 `hotfix/*`; it can also be run manually with a branch name.
