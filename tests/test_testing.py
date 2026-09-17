@@ -1,4 +1,4 @@
-from dev.harness.testing import detect_test_command
+from devx.harness.testing import detect_test_command
 
 
 def test_detects_python_project(tmp_path):

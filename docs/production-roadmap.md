@@ -1,6 +1,6 @@
 # Production Readiness Roadmap
 
-This roadmap defines the work required to move `dev` from a strong staging
+This roadmap defines the work required to move `devx` from a strong staging
 implementation to a production-ready coding agent. It is intentionally gated:
 each phase has explicit acceptance criteria, and a later phase must not be
 considered complete because an earlier phase is unfinished.
@@ -17,41 +17,45 @@ The project currently has:
 - Approval-gated workspace tools.
 - Session persistence, export/import, rollback support, and async checkpoint
   support.
+- Bounded approval previews, `/diff`, `/undo`, `/plan`, and CLI `--plan-only`.
+- Configurable lint/test checks, bounded context selection, and structured
+  cancellation.
+- Model-aware semantic caching and a deterministic offline benchmark suite.
+- Ordered project permissions, bounded context compaction, a shared tool
+  registry, workspace plugins, and stdio MCP tool support.
 - Unit, TUI, mocked integration, and configuration tests.
 
-The latest local validation includes the complete automated suite, linting, and
-diff validation. This is not yet equivalent to live provider, cross-platform,
+The latest local validation includes 70 passing tests, provider-contract
+coverage, linting, compilation, diff validation, and passing offline
+benchmarks. This is not yet equivalent to live-provider, cross-platform,
 security, or release acceptance.
 
-## Phase 1: Close functional gaps
+## Phase 1: Runtime foundation (implemented; hardening remains)
 
 ### Objectives
 
-Complete the runtime behavior expected from a reliable coding agent.
+The core runtime behavior expected from a reliable coding agent is implemented.
+Remaining work is focused on cross-platform and live-provider hardening.
 
 ### Work items
 
-1. Replace custom synchronous orchestration with a durable LangGraph
-   `StateGraph` for planner, coder, tester, and supervisor stages.
-2. Persist graph state and checkpoints so interrupted runs can resume safely.
-3. Implement a bounded tester/fix loop with explicit maximum attempts.
-4. Detect common project test frameworks and select safe test commands.
-5. Integrate token and agent-event streaming into the TUI transcript.
-6. Complete conversational session resume, including transcript restoration,
-   active session switching, and recovery after process restart.
-7. Make provider and model changes refresh the active status and apply clearly
-   to future runs.
-8. Keep all command failures user-visible and non-fatal to the TUI.
+1. ~~Replace custom synchronous orchestration with a durable LangGraph
+   `StateGraph` for planner, coder, tester, and supervisor stages.~~
+2. ~~Persist graph state and checkpoints so interrupted runs can resume safely.~~
+3. ~~Implement a bounded tester/fix loop with explicit maximum attempts.~~
+4. ~~Detect common project test frameworks and select safe test commands.~~
+5. ~~Integrate token and agent-event streaming into the TUI transcript.~~
+6. ~~Complete conversational session resume, including transcript restoration,
+   active session switching, and recovery after process restart.~~
+7. ~~Make provider and model changes refresh the active status and apply clearly
+   to future runs.~~
+8. ~~Keep all command failures user-visible and non-fatal to the TUI.~~
 
 ### Exit criteria
 
-- A run can resume after process interruption without losing persisted state.
-- Planner, coder, tester, and repair transitions are observable and bounded.
-- Test execution never exceeds configured attempts or command timeouts.
-- Streaming output is visible without blocking prompt input or approvals.
-- Session switching restores the expected transcript and agent context.
-- Unit and integration tests cover success, failure, cancellation, retry, and
-  resume paths.
+- The implemented runtime acceptance criteria are covered by deterministic and
+  mocked tests; credentialed live acceptance and full cross-platform recovery
+  testing remain release gates.
 
 ## Phase 2: Test and quality hardening
 
@@ -71,6 +75,8 @@ Cover:
 - Workspace path containment.
 - Approval policies.
 - Context bounds and deterministic file selection.
+- Approval previews, diff/undo, plan-only, lint configuration, and benchmark
+  behavior.
 - Session serialization, import, export, rename, and recovery.
 - Retry and cancellation state transitions.
 
@@ -127,8 +133,9 @@ Run the required checks on:
 python -m pip install --upgrade pip
 python -m pip install -c constraints.txt -e ".[agent,tui,cli,dev]"
 python -m pytest -q
-python -m ruff check src tests
-python -m compileall -q src
+python -m ruff check src tests scripts
+python -m compileall -q src tests scripts
+python scripts/benchmark.py
 ```
 
 Add separate jobs for:
@@ -156,6 +163,7 @@ Add separate jobs for:
 - A fresh checkout can build and install the wheel on all three operating
   systems.
 - CI fails closed when tests, lint, build, or security checks fail.
+- Offline benchmarks pass without provider credentials.
 - Release artifacts are retained and checksummed.
 
 ## Phase 4: Security and dependency readiness
@@ -208,9 +216,9 @@ Windows:
 .venv\Scripts\activate
 python -m pip install --upgrade pip
 python -m pip install -c constraints.txt -e ".[agent,tui,cli,dev]"
-dev doctor
-dev --help
-dev
+devx doctor
+devx --help
+devx
 ```
 
 Linux and macOS:
@@ -219,9 +227,9 @@ Linux and macOS:
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -c constraints.txt -e ".[agent,tui,cli,dev]"
-dev doctor
-dev --help
-dev
+devx doctor
+devx --help
+devx
 ```
 
 ### Wheel validation
@@ -229,17 +237,17 @@ dev
 ```text
 python -m build
 python -m pip install dist/*.whl
-dev doctor
+devx doctor
 ```
 
 Verify that the installed command works from a directory outside the project
-and that `DEV_WORKSPACE` follows the command's current working directory as
+and that `DEVX_WORKSPACE` follows the command's current working directory as
 documented.
 
 ### Exit criteria
 
 - Editable and wheel installs both work.
-- `dev`, `dev doctor`, `dev --help`, and the default TUI launch work.
+- `devx`, `devx doctor`, `devx --help`, and the default TUI launch work.
 - First-time provider setup works without pre-existing configuration.
 - `.env` and user-wide configuration precedence is correct.
 - Clipboard, autocomplete, modal navigation, and session commands work on all
@@ -255,7 +263,7 @@ Add the controls needed to support real users without exposing sensitive data.
   cancellation failures.
 - Configurable retry, timeout, token, and tool-call budgets.
 - Diagnostic export that excludes API keys and sensitive file contents.
-- Health information through `dev doctor`.
+- Health information through `devx doctor`.
 - Documented recovery, rollback, and session-export procedures.
 - A support process for provider outages and model catalog changes.
 
@@ -276,7 +284,7 @@ Create a release candidate only after Phases 1–6 are complete.
 - [ ] Linux, Windows, and macOS CI passes.
 - [ ] Clean editable and wheel installation passes.
 - [ ] TUI works with the installed Textual runtime.
-- [ ] `dev doctor` reports a healthy installation.
+- [ ] `devx doctor` reports a healthy installation.
 - [ ] Security and dependency scans pass.
 - [ ] No critical or high-severity open defects remain.
 - [ ] Documentation matches the shipped command and configuration behavior.
@@ -300,8 +308,7 @@ Create a release candidate only after Phases 1–6 are complete.
 The project is production-ready only when every release-candidate checklist
 item is complete and the following statement is true:
 
-> A new user can install `dev` on a supported operating system, configure a
+> A new user can install `devx` on a supported operating system, configure a
 > supported provider, run an approval-gated coding task, recover from a failed
 > or interrupted run, and receive safe, diagnosable behavior without exposing
 > credentials or leaving the workspace boundary.
-

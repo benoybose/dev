@@ -1,2 +1,1 @@
-"""Repository maintenance scripts."""
-
+"""Developer scripts that can also be imported by the test suite."""

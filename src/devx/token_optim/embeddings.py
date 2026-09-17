@@ -29,6 +29,10 @@ class LocalEmbedder:
         try:
             self.model: Any = SentenceTransformer(model_name, **kwargs)
         except TypeError:
+            if local_files_only:
+                raise RuntimeError(
+                    "The installed sentence-transformers version cannot enforce offline loading"
+                )
             kwargs.pop("local_files_only", None)
             self.model = SentenceTransformer(model_name, **kwargs)
 

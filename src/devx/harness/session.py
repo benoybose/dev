@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -35,14 +36,27 @@ class SessionStore:
         conn.execute("PRAGMA busy_timeout=5000;")
         return conn
 
+    @contextmanager
+    def _connection(self):
+        conn = self._connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
+
     def save(self, session_id: str | None, name: str, state: dict[str, Any], metadata: dict[str, Any] | None = None) -> str:
         sid = session_id or str(uuid.uuid4())
         now = datetime.now(UTC).isoformat()
         with self._connect() as conn:
             old = conn.execute("SELECT created_at FROM sessions WHERE id=?", (sid,)).fetchone()
             created = old[0] if old else now
-            conn.execute("INSERT OR REPLACE INTO sessions VALUES (?, ?, ?, ?, ?, ?)",
-                         (sid, name, created, now, json.dumps(state), json.dumps(metadata or {})))
+            conn.execute(
+                """INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET name=excluded.name,
+                   updated_at=excluded.updated_at, state=excluded.state,
+                   metadata=excluded.metadata""",
+                (sid, name, created, now, json.dumps(state), json.dumps(metadata or {})),
+            )
         return sid
 
     def load(self, session_id: str) -> dict[str, Any] | None:
@@ -59,16 +73,23 @@ class SessionStore:
 
     def delete(self, session_id: str) -> bool:
         with self._connect() as conn:
-            return conn.execute("DELETE FROM sessions WHERE id=? OR name=?", (session_id, session_id)).rowcount > 0
+            rows = conn.execute("SELECT id FROM sessions WHERE id=? OR name=?", (session_id, session_id)).fetchall()
+            if not rows:
+                return False
+            ids = [row[0] for row in rows]
+            conn.executemany("DELETE FROM session_events WHERE session_id=?", [(sid,) for sid in ids])
+            conn.executemany("DELETE FROM sessions WHERE id=?", [(sid,) for sid in ids])
+            return True
 
     def rename(self, session_id: str, name: str) -> bool:
         """Rename a saved session, returning whether it existed."""
         clean_name = name.strip()
         if not clean_name:
             raise ValueError("Session name must not be empty")
+        now = datetime.now(UTC).isoformat()
         with self._connect() as conn:
-            return conn.execute("UPDATE sessions SET name=? WHERE id=? OR name=?",
-                                (clean_name, session_id, session_id)).rowcount > 0
+            return conn.execute("UPDATE sessions SET name=?, updated_at=? WHERE id=? OR name=?",
+                                (clean_name, now, session_id, session_id)).rowcount > 0
 
     def export_session(self, session_id: str, path: Path) -> Path:
         """Export one session and its event history as portable JSON."""

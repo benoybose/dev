@@ -86,9 +86,11 @@ class UserConfig:
     """Manage user-wide settings without exposing secrets to session storage."""
 
     def __init__(self, path: Path | None = None):
-        self.path = (path or Path.home() / ".dev" / "config.env").expanduser()
+        self.path = (path or Path.home() / ".devx" / "config.env").expanduser()
 
     def update(self, values: dict[str, str]) -> None:
+        if any("\n" in value or "\r" in value for value in values.values()):
+            raise ConfigurationError("Configuration values must not contain newlines")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         existing = self.path.read_text(encoding="utf-8").splitlines() if self.path.exists() else []
         remaining = dict(values)
@@ -114,26 +116,26 @@ class UserConfig:
         if name not in PROVIDERS:
             raise ConfigurationError(f"Unknown provider: {provider}")
         details = PROVIDERS[name]
-        values = {"DEV_PROVIDER": name}
+        values = {"DEVX_PROVIDER": name}
         if details["base_url"]:
-            values["DEV_BASE_URL"] = details["base_url"]
+            values["DEVX_BASE_URL"] = details["base_url"]
         self.update(values)
 
     def set_model(self, model: str) -> None:
         if not model.strip():
             raise ConfigurationError("Model identifier must not be empty")
-        self.update({"DEV_MODEL": model.strip()})
+        self.update({"DEVX_MODEL": model.strip()})
 
     def set_api_key(self, api_key: str) -> None:
         if not api_key.strip():
             raise ConfigurationError("API key must not be empty")
-        self.update({"DEV_API_KEY": api_key.strip()})
+        self.update({"DEVX_API_KEY": api_key.strip()})
 
 
 def list_models(base_url: str, api_key: str = "") -> list[ModelInfo]:
     """Discover models from an OpenAI-compatible ``/models`` endpoint."""
     endpoint = base_url.rstrip("/") + "/models"
-    headers = {"Accept": "application/json", "User-Agent": "dev-coding-agent"}
+    headers = {"Accept": "application/json", "User-Agent": "devx-coding-agent"}
     if api_key and api_key != "sk-placeholder":
         headers["Authorization"] = f"Bearer {api_key}"
     request = Request(endpoint, headers=headers, method="GET")

@@ -1,0 +1,6 @@
+[
+  {"name": "bounded-read", "kind": "bounded_read", "max_bytes": 128},
+  {"name": "command-safety", "kind": "command_safety"},
+  {"name": "journal-rollback", "kind": "journal_rollback"},
+  {"name": "context-budget", "kind": "context_budget", "max_bytes": 256}
+]

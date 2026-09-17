@@ -7,19 +7,35 @@ package, CLI, TUI, LangGraph supervisor, approval controls, sessions, local
 context optimization, testing hooks, provider/model configuration commands,
 packaging, and CI definitions are in place.
 
+The current development line also includes:
+
+- `/diff`, `/undo`, and `/plan <task>` in the TUI.
+- `devx ask --plan-only` and `--json` output for CLI workflows.
+- Bounded approval previews for proposed writes and replacements.
+- Configurable linting through `DEVX_LINT_COMMAND` before tests.
+- Deterministic context selection with `DEVX_MAX_CONTEXT_FILES`, with optional
+  local embeddings for semantic relevance.
+- Provider/model/embedder-aware semantic-cache namespaces and structured
+  cancellation results.
+- Offline benchmarks for bounded output, command safety, rollback, and context
+  budgets.
+- Ordered project permissions, bounded session compaction, a shared tool
+  registry, workspace plugins, and stdio MCP tools.
+
 Current local validation:
 
-- 29 automated tests are defined; the suite includes session import/export,
-  versioning, and framework-detection coverage.
+- 70 automated tests pass; the suite includes session import/export,
+  versioning, framework detection, previews, plan-only execution, context
+  selection, cache isolation, permissions, plugins, MCP, and benchmark coverage.
 - Ruff and Python compilation passing.
+- Git diff validation and offline DX benchmarks passing.
 - Textual pilot tests passing.
 - LangChain provider-contract and tool-calling smoke tests passing.
 - LangGraph SQLite checkpoint construction passing.
-- Wheel build and isolated installation passing.
-- Declared dependency audit passing.
-- Bandit static security scanning is now part of CI.
+- Package build, dependency audit, license scan, and Bandit results remain
+  clean-environment release gates.
 
-## Release 0.1.0 gate
+## Release gate
 
 ### External validation
 
@@ -36,12 +52,12 @@ Current local validation:
 
 - Review the final wheel and source distribution contents.
 - Confirm version, changelog, README, security policy, and license metadata.
-- Create the `v0.1.0` tag.
+- Create the release tag matching the version managed by the release workflow.
 - Publish through the release workflow.
 - Install the published package in a clean environment.
 - Verify `devx doctor`, `devx sessions`, `devx ask`, and `devx tui` after install.
 
-## Post-release 0.2.0
+## Next release hardening
 
 ### Reliability and workflow quality
 
@@ -55,7 +71,8 @@ Current local validation:
 
 ### User experience
 
-- Add richer diff previews with file-by-file accept/reject decisions.
+- Add richer diff previews with file-by-file accept/reject decisions; the current
+  implementation provides bounded whole-action previews.
 - Expand streamed model/tool output coverage and rendering quality in the
   conversation view.
 - Add comprehensive tests and safer UX around the TUI session rename, delete,
@@ -64,7 +81,7 @@ Current local validation:
   policies rather than only selecting a requested perspective.
 - Add machine-readable event streaming for CLI automation.
 
-## Post-release 0.3.0
+## Later performance and operations
 
 ### Context and performance
 
@@ -74,7 +91,8 @@ Current local validation:
 - Add cache invalidation based on model identity, workspace state, and file
   hashes.
 - Add context-budget diagnostics and per-run token/latency reporting.
-- Benchmark indexing, context selection, cache lookup, and tool execution.
+- Extend benchmarks with model latency, cache-hit rates, context-selection
+  quality, and cross-platform process cleanup measurements.
 
 ### Observability
 

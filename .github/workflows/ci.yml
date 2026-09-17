@@ -22,11 +22,13 @@ jobs:
       - name: Install development dependencies
         run: python -m pip install -c constraints.txt -e ".[dev,cli,tui,agent]"
       - name: Lint
-        run: python -m ruff check src tests
+        run: python -m ruff check src tests scripts
       - name: Compile
-        run: python -m compileall -q src tests
+        run: python -m compileall -q src tests scripts
       - name: Test
         run: python -m pytest -q
+      - name: Offline DX benchmark
+        run: python scripts/benchmark.py
       - name: Dependency audit
         run: python -m pip install pip-audit && python -m pip_audit -r requirements-audit.txt
       - name: Static security scan

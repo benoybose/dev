@@ -15,10 +15,14 @@ class DevxState:
     messages: list[dict[str, str]] = field(default_factory=list)
     files_in_context: list[str] = field(default_factory=list)
     active_agent: str = "supervisor"
+    requested_agent: str = "supervisor"
     events: list[dict[str, Any]] = field(default_factory=list)
     iteration: int = 0
     status: str = "pending"
     result: str = ""
+    test_result: str = ""
+    lint_command: str = ""
+    lint_result: str = ""
 
 
 DevState = DevxState
@@ -56,7 +60,10 @@ build_dev_graph = build_devx_graph
 def build_model_graph(settings: Any, files: list[str] | None = None) -> AgentGraph:
     warnings.warn("build_model_graph is deprecated; use build_supervisor_graph", DeprecationWarning, stacklevel=2)
     from pathlib import Path
-    context = read_context([Path(item) for item in (files or [])], settings.max_file_bytes)
+
+    from devx.harness.permissions import PermissionPolicy
+    policy = PermissionPolicy(settings.workspace, settings.approval_required)
+    context = read_context([policy.path(Path(item)) for item in (files or [])], settings.max_file_bytes)
 
     def run(state: DevxState) -> DevxState:
         prompt = ("You are a careful coding assistant. Analyze the request and supplied files. "
@@ -82,14 +89,20 @@ def build_model_graph(settings: Any, files: list[str] | None = None) -> AgentGra
 
 
 def build_supervisor_graph(settings: Any, approvals: Any, files: list[str] | None = None, run_id: str | None = None,
-                           cancellation: Any = None, event_sink: Any = None, session_id: str | None = None) -> AgentGraph:
+                           cancellation: Any = None, event_sink: Any = None, session_id: str | None = None,
+                           plan_only: bool = False) -> Any:
     import uuid
 
     try:
         from devx.agents.langgraph_supervisor import build_langgraph_supervisor
-        return build_langgraph_supervisor(settings, approvals, files, run_id or str(uuid.uuid4()), session_id, cancellation, event_sink)
+        return build_langgraph_supervisor(
+            settings, approvals, files, run_id or str(uuid.uuid4()), session_id, cancellation, event_sink,
+            plan_only=plan_only,
+        )
     except ImportError:
         pass
     from devx.agents.supervisor import SupervisorRunner
-    runner = SupervisorRunner(settings, approvals, run_id or str(uuid.uuid4()), cancellation, event_sink, session_id)
+    runner = SupervisorRunner(
+        settings, approvals, run_id or str(uuid.uuid4()), cancellation, event_sink, session_id, plan_only,
+    )
     return AgentGraph(runner)

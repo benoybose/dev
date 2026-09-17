@@ -35,6 +35,7 @@ htmlcov/
 
 # Local agent state and runtime data
 .dev/
+.devx/
 .release-check/
 *.db
 *.db-shm

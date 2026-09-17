@@ -1,6 +1,6 @@
 from typer.testing import CliRunner
 
-from dev.cli.app import app
+from devx.cli.app import app
 
 
 def test_cli_without_subcommand_starts_default_tui(monkeypatch):
@@ -13,7 +13,7 @@ def test_cli_without_subcommand_starts_default_tui(monkeypatch):
         def run(self):
             started.append(("run",))
 
-    monkeypatch.setattr("dev.tui.app.DevTUI", FakeTUI)
+    monkeypatch.setattr("devx.tui.app.DevTUI", FakeTUI)
 
     result = CliRunner().invoke(app, [])
 
@@ -31,7 +31,7 @@ def test_explicit_tui_command_preserves_session_option(monkeypatch):
         def run(self):
             started.append(("run",))
 
-    monkeypatch.setattr("dev.tui.app.DevTUI", FakeTUI)
+    monkeypatch.setattr("devx.tui.app.DevTUI", FakeTUI)
 
     result = CliRunner().invoke(app, ["tui", "--session", "local-dev"])
 

@@ -1,6 +1,6 @@
 # Cross-Platform CLI Development Guide
 
-This guide explains how to install, run, test, and troubleshoot the `dev`
+This guide explains how to install, run, test, and troubleshoot the `devx`
 command while developing this project on Linux, macOS, or Windows.
 
 The project exposes the CLI through the following declaration in
@@ -8,11 +8,11 @@ The project exposes the CLI through the following declaration in
 
 ```toml
 [project.scripts]
-dev = "dev.cli.app:main"
+devx = "devx.cli.app:main"
 ```
 
-Installing the project creates a platform-specific launcher named `dev`.
-Installing in editable mode means that changes under `src/dev` are used
+Installing the project creates a platform-specific launcher named `devx`.
+Installing in editable mode means that changes under `src/devx` are used
 immediately without rebuilding or reinstalling the package.
 
 ## Prerequisites
@@ -84,7 +84,7 @@ Each part has a specific purpose:
 | `python -m pip` | Runs pip through the active Python interpreter, preventing installation into a different Python installation. |
 | `install` | Installs the project and its dependencies. |
 | `-c constraints.txt` | Applies the repository's tested dependency versions where specified. It improves reproducibility without replacing the package's dependency declarations. |
-| `-e` | Installs the project in editable mode. Source changes under `src/dev` are available immediately without reinstalling. |
+| `-e` | Installs the project in editable mode. Source changes under `src/devx` are available immediately without reinstalling. |
 | `.` | Installs the project from the current repository directory. |
 | `[agent,tui,cli,dev]` | Installs the selected optional dependency groups. |
 
@@ -92,7 +92,7 @@ The selected extras provide:
 
 - `agent`: LangChain, LangGraph, synchronous/asynchronous SQLite checkpoint support, and the OpenAI-compatible model adapter.
 - `tui`: Textual for the terminal user interface.
-- `cli`: Typer for the `dev` command and subcommands.
+- `cli`: Typer for the `devx` command and subcommands.
 - `dev`: pytest, coverage tooling, Ruff, and Pyright for development and validation.
 
 The command also installs the project's base dependencies, including the
@@ -131,13 +131,13 @@ python -m pip --version
 Then verify the installed project and console launcher:
 
 ```text
-python -m pip show dev-coding-agent
-dev --help
-dev doctor
+python -m pip show devx-coding-agent
+devx --help
+devx doctor
 ```
 
 `pip show` should report the repository location as the editable project
-location. `dev doctor` should report the workspace and installed optional
+location. `devx doctor` should report the workspace and installed optional
 dependencies.
 
 ### Common installation variations
@@ -162,25 +162,25 @@ python -m pip install --upgrade -c constraints.txt -e ".[agent,tui,cli,dev]"
 ```
 
 Avoid installing into the system Python for development. Keeping the project
-inside `.venv` makes the `dev` launcher, tests, and dependency versions
+inside `.venv` makes the `devx` launcher, tests, and dependency versions
 isolated from other projects.
 
-## How the `dev` command is created
+## How the `devx` command is created
 
 The editable installation creates a console launcher inside the virtual
 environment:
 
 | Platform | Launcher |
 |---|---|
-| Linux | `.venv/bin/dev` |
-| macOS | `.venv/bin/dev` |
-| Windows | `.venv\\Scripts\\dev.exe` |
+| Linux | `.venv/bin/devx` |
+| macOS | `.venv/bin/devx` |
+| Windows | `.venv\\Scripts\\devx.exe` |
 
 Activating the virtual environment adds that directory to the current shell's
 `PATH`. Therefore this resolves to the project launcher:
 
 ```text
-dev doctor
+devx doctor
 ```
 
 Check the resolved executable with:
@@ -188,28 +188,28 @@ Check the resolved executable with:
 Linux and macOS:
 
 ```bash
-which dev
+which devx
 ```
 
 Windows PowerShell:
 
 ```powershell
-Get-Command dev
-where.exe dev
+Get-Command devx
+where.exe devx
 ```
 
 The result should point inside the repository's `.venv` directory. The
 launcher can also be called directly without activation:
 
 ```bash
-.venv/bin/dev doctor
+.venv/bin/devx doctor
 ```
 
 ```powershell
-.\.venv\Scripts\dev.exe doctor
+.\.venv\Scripts\devx.exe doctor
 ```
 
-## Make `dev` available from every directory
+## Make `devx` available from every directory
 
 For ongoing development, use a dedicated user virtual environment instead of
 installing into the system Python. Install the repository in editable mode and
@@ -218,16 +218,16 @@ add that environment's launcher directory to the user `PATH`.
 ### Windows PowerShell
 
 ```powershell
-py -3.12 -m venv "$env:USERPROFILE\.venvs\dev-coding-agent"
-& "$env:USERPROFILE\.venvs\dev-coding-agent\Scripts\python.exe" `
-  -m pip install -c C:\Projects\dev\constraints.txt `
-  -e "C:\Projects\dev[agent,tui,cli,dev]"
+py -3.12 -m venv "$env:USERPROFILE\.venvs\devx-coding-agent"
+& "$env:USERPROFILE\.venvs\devx-coding-agent\Scripts\python.exe" `
+  -m pip install -c C:\Projects\devx\constraints.txt `
+  -e "C:\Projects\devx[agent,tui,cli,dev]"
 ```
 
 Add the launcher directory permanently to the user `PATH`:
 
 ```powershell
-$devScripts = "$env:USERPROFILE\.venvs\dev-coding-agent\Scripts"
+$devScripts = "$env:USERPROFILE\.venvs\devx-coding-agent\Scripts"
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if (($userPath -split ";") -notcontains $devScripts) {
     [Environment]::SetEnvironmentVariable("Path", "$devScripts;$userPath", "User")
@@ -237,48 +237,48 @@ if (($userPath -split ";") -notcontains $devScripts) {
 Open a new PowerShell window and verify:
 
 ```powershell
-Get-Command dev
-dev doctor
+Get-Command devx
+devx doctor
 ```
 
 ### Linux and macOS
 
 ```bash
-python3 -m venv ~/.venvs/dev-coding-agent
-~/.venvs/dev-coding-agent/bin/python \
-  -m pip install -c /path/to/dev/constraints.txt \
-  -e "/path/to/dev[agent,tui,cli,dev]"
+python3 -m venv ~/.venvs/devx-coding-agent
+~/.venvs/devx-coding-agent/bin/python \
+  -m pip install -c /path/to/devx/constraints.txt \
+  -e "/path/to/devx[agent,tui,cli,dev]"
 ```
 
 Add the launcher directory to the shell startup file:
 
 ```bash
-echo 'export PATH="$HOME/.venvs/dev-coding-agent/bin:$PATH"' >> ~/.profile
-export PATH="$HOME/.venvs/dev-coding-agent/bin:$PATH"
+echo 'export PATH="$HOME/.venvs/devx-coding-agent/bin:$PATH"' >> ~/.profile
+export PATH="$HOME/.venvs/devx-coding-agent/bin:$PATH"
 ```
 
 For macOS users running Zsh, use `~/.zshrc` instead of `~/.profile`.
 Verify with:
 
 ```bash
-which dev
-dev doctor
+which devx
+devx doctor
 ```
 
-The editable install means changes under the repository's `src/dev` directory
+The editable install means changes under the repository's `src/devx` directory
 are available from every working directory without reinstalling. Reinstall
 only after changing dependencies or package metadata.
 
-When invoking `dev` from another project, use the user-wide
-`~/.dev/config.env` for provider settings. The CLI always uses the current
-working directory as its workspace; change directories before invoking `dev`.
+When invoking `devx` from another project, use the user-wide
+`~/.devx/config.env` for provider settings. The CLI always uses the current
+working directory as its workspace; change directories before invoking `devx`.
 The programmatic `Settings.load(workspace=...)` override is reserved for
 library callers and tests.
 
 ## Configure a provider
 
 The CLI loads configuration from environment variables, a workspace `.env`
-file, and (when present) `~/.dev/config.env`. Environment variables take
+file, and (when present) `~/.devx/config.env`. Environment variables take
 precedence over the workspace file, which takes precedence over the user file.
 Copy `.env.example` to `.env` for local development. The real `.env` file is
 ignored by Git.
@@ -289,36 +289,42 @@ current shell as follows.
 Linux and macOS:
 
 ```bash
-export DEV_BASE_URL="https://openrouter.ai/api/v1"
-export DEV_API_KEY="sk-or-v1-your-openrouter-key"
-export DEV_MODEL="poolside/laguna-s-2.1:free"
-export DEV_PROVIDER="openrouter"
-export DEV_APPROVAL_REQUIRED="true"
+export DEVX_BASE_URL="https://openrouter.ai/api/v1"
+export DEVX_API_KEY="sk-or-v1-your-openrouter-key"
+export DEVX_MODEL="poolside/laguna-s-2.1:free"
+export DEVX_PROVIDER="openrouter"
+export DEVX_APPROVAL_REQUIRED="true"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:DEV_BASE_URL = "https://openrouter.ai/api/v1"
-$env:DEV_API_KEY = "sk-or-v1-your-openrouter-key"
-$env:DEV_MODEL = "poolside/laguna-s-2.1:free"
-$env:DEV_PROVIDER = "openrouter"
-$env:DEV_APPROVAL_REQUIRED = "true"
+$env:DEVX_BASE_URL = "https://openrouter.ai/api/v1"
+$env:DEVX_API_KEY = "sk-or-v1-your-openrouter-key"
+$env:DEVX_MODEL = "poolside/laguna-s-2.1:free"
+$env:DEVX_PROVIDER = "openrouter"
+$env:DEVX_APPROVAL_REQUIRED = "true"
 ```
 
-For user-wide persistent configuration, create `~/.dev/config.env`. On Windows this is
-normally `%USERPROFILE%\\.dev\\config.env`.
+For user-wide persistent configuration, create `~/.devx/config.env`. On Windows this is
+normally `%USERPROFILE%\.devx\\config.env`.
 
 ```env
-DEV_PROVIDER=openrouter
-DEV_BASE_URL=https://openrouter.ai/api/v1
-DEV_API_KEY=sk-or-v1-your-openrouter-key
-DEV_MODEL=poolside/laguna-s-2.1:free
-DEV_APPROVAL_REQUIRED=true
-DEV_TEST_COMMAND=pytest
+DEVX_PROVIDER=openrouter
+DEVX_BASE_URL=https://openrouter.ai/api/v1
+DEVX_API_KEY=sk-or-v1-your-openrouter-key
+DEVX_MODEL=poolside/laguna-s-2.1:free
+DEVX_APPROVAL_REQUIRED=true
+DEVX_TEST_COMMAND=pytest
+DEVX_LINT_COMMAND=ruff check
 ```
 
 Never commit API keys or place them in tracked project files.
+
+Project-scoped permissions, plugins, MCP servers, and context-compaction
+limits are configured in `.devx/config.json`. Keep provider credentials in
+`.env` or `~/.devx/config.env`; project JSON is for non-secret behavior. See
+[Extensibility](extensibility.md) for examples and safety rules.
 
 The recommended acceptance profile is `poolside/laguna-s-2.1:free`. Replace
 the model with another OpenRouter model when testing compatibility.
@@ -328,14 +334,14 @@ the model with another OpenRouter model when testing compatibility.
 Run the diagnostic command after configuration:
 
 ```text
-dev doctor
+devx doctor
 ```
 
 It reports the workspace, provider, model, optional dependency status, and
 overall configuration status. Inspect the complete command surface with:
 
 ```text
-dev --help
+devx --help
 ```
 
 ## Run CLI tasks
@@ -343,8 +349,8 @@ dev --help
 Run a one-shot task:
 
 ```text
-dev ask "inspect @src/dev/cli/app.py"
-dev ask "run the tests and explain any failures"
+devx ask "inspect @src/devx/cli/app.py"
+devx ask "run the tests and explain any failures"
 ```
 
 The `@path` syntax supplies files or directories from the configured
@@ -353,41 +359,54 @@ workspace. Paths outside the workspace are rejected.
 Use a named session to preserve conversational state:
 
 ```text
-dev ask --session local-dev "inspect the project structure"
-dev ask --session local-dev "suggest improvements"
-dev sessions
-dev session events local-dev
+devx ask --session local-devx "inspect the project structure"
+devx ask --session local-devx "suggest improvements"
+devx sessions
+devx session events local-devx
 ```
 
 Use JSON output for scripts or automation:
 
 ```text
-dev ask --json "summarize the repository"
+devx ask --json "summarize the repository"
+```
+
+Generate a plan without invoking coding, testing, project commands, or file
+mutations:
+
+```text
+devx ask --plan-only "design the authentication refactor"
 ```
 
 For trusted, isolated workspaces, `--approve-all` automatically approves file
 writes and commands:
 
 ```text
-dev ask --approve-all "run the test suite and fix failures"
+devx ask --approve-all "run the test suite and fix failures"
 ```
 
 Only use automatic approval when the workspace and generated changes are
 trusted.
+
+The TUI provides the same plan-only workflow with `/plan <task>`. During a
+normal run, `/cancel` requests structured cancellation; `/diff` shows the
+bounded current Git diff, and `/undo` restores the last run's journaled changes
+when the files still match their recorded post-change hashes. Approval dialogs
+show a bounded proposed diff for write and replacement actions.
 
 ## Run the TUI
 
 The Textual user interface is included by the `tui` extra:
 
 ```text
-dev
-dev tui
+devx
+devx tui
 ```
 
 Resume a named session from the TUI when supported by the installed version:
 
 ```text
-dev tui --session local-dev
+devx tui --session local-devx
 ```
 
 The prompt is focused automatically when the TUI starts. Slash commands and
@@ -468,6 +487,12 @@ Run linting:
 python -m ruff check src tests scripts
 ```
 
+Run the deterministic offline developer-experience benchmarks:
+
+```text
+python scripts/benchmark.py
+```
+
 Compile-check the Python sources:
 
 ```text
@@ -480,14 +505,29 @@ Run focused tests while developing:
 python -m pytest -q tests/test_core.py
 python -m pytest -q tests/test_tui_smoke.py
 python -m pytest -q tests/test_version.py
+python -m pytest -q tests/test_provider_contract.py
 ```
 
+The complete deterministic validation set is:
+
+```text
+python -m pytest -q
+python -m pytest -q tests/test_provider_contract.py
+python scripts/benchmark.py
+python -m ruff check src tests scripts
+python -m compileall -q src tests scripts
+git diff --check
+```
+
+The current suite includes extension tests for ordered permissions, bounded
+compaction, workspace plugins, and stdio MCP tools.
+
 The CI workflow additionally runs dependency auditing, provider contract
-tests, package building, wheel installation, and the `dev doctor` smoke test.
+tests, package building, wheel installation, and the `devx doctor` smoke test.
 
 ## Common problems
 
-### `dev` is not recognized
+### `devx` is not recognized
 
 The virtual environment is probably not active, or the editable install did
 not complete. Activate the environment and reinstall:
@@ -518,15 +558,15 @@ Then activate the environment again.
 Check the active values without printing the secret:
 
 ```bash
-echo "$DEV_BASE_URL"
-echo "$DEV_MODEL"
-echo "$DEV_PROVIDER"
+echo "$DEVX_BASE_URL"
+echo "$DEVX_MODEL"
+echo "$DEVX_PROVIDER"
 ```
 
 ```powershell
-$env:DEV_BASE_URL
-$env:DEV_MODEL
-$env:DEV_PROVIDER
+$env:DEVX_BASE_URL
+$env:DEVX_MODEL
+$env:DEVX_PROVIDER
 ```
 
 Verify that the selected provider package is installed and that the endpoint
@@ -571,4 +611,5 @@ Do not remove the project source or `.git` directory.
 
 - [README](../README.md) — project overview, configuration, and CLI reference
 - [Architecture](architecture.md) — runtime and agent design
+- [Extensibility](extensibility.md) — permissions, plugins, MCP, and compaction
 - [GitFlow](gitflow.md) — branch and semantic-versioning policy

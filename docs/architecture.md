@@ -1,8 +1,15 @@
-# `devx`: A Detailed Blueprint for Building an AI Coding Agent as a Local TUI and CLI
+# `devx`: Architecture and Implementation Notes
 
 ## Executive Summary
 
 `devx` is a locally installed AI coding agent that works with any OpenAI-compatible inference API (including tool calling). It uses **LangChain** and **LangGraph** for the agentic harness, **Textual** for the terminal UI, **Typer** for the CLI entrypoint, and local embeddings for client-side token optimization. Users reference files and directories with `@` mentions and control sessions and agents with a minimal set of slash commands.
+
+This document combines the original design blueprint with the current
+implementation. Code snippets labeled as examples are illustrative; the
+authoritative runtime paths are under `src/devx/`. The implemented workflow is
+planner → coder → tester with bounded repair, approval-gated mutations,
+checkpoint-compatible sessions, plan-only execution, cancellation, and
+journaled recovery.
 
 ---
 
@@ -18,9 +25,9 @@
 │                 Agentic Harness (Multi-Agent)                │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │        LangGraph State Machine / Supervisor            │  │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐    │  │
-│  │  │ Planner │ │  Coder  │ │ Tester  │ │  Docs   │    │  │
-│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘    │  │
+│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐                │  │
+│  │  │ Planner │ │  Coder  │ │ Tester  │                │  │
+│  │  └─────────┘ └─────────┘ └─────────┘                │  │
 │  └──────────────────────────────────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────┤
 │              Token Optimization Layer (Client-Side)          │
@@ -51,14 +58,17 @@
 | CLI | `typer` | Command registration, argument parsing, help text |
 | Input completion | `prompt_toolkit` | `@` file/directory fuzzy completion |
 | Local embeddings | `sentence-transformers` or `onnxruntime` | Client-side token optimization, zero API calls |
-| Vector storage | `chromadb` or `sqlite-vec` | Semantic cache and memory storage |
+| Cache storage | SQLite (`SemanticCache`) | Namespaced semantic cache and file fingerprints |
 | Model client | `langchain-openai` | Any OpenAI-compatible API |
 
 ### Why These Libraries
 
 **LangGraph over a simple AgentExecutor**: Coding tasks require multi-step state management (read file → analyze → edit → test → fix). LangGraph provides an explicit state machine with conditional branching, loops, and interrupt/resume. Multi-agent patterns (Supervisor / Swarm) are production-proven.
 
-**Local embeddings for token optimization**: Quantized INT8 models like `intelli-embed-v2` run on CPU at roughly 10ms per embedding and achieve ~98% of Azure text-embedding-3-small quality. The key advantage: **zero API calls** — embedding computation consumes no inference tokens.
+**Local embeddings for token optimization**: Embeddings are optional and run
+locally through the configured `sentence-transformers` model. They never make
+provider API calls. When disabled or unavailable, deterministic lexical file
+selection still enforces the context-file limit.
 
 ---
 
@@ -70,41 +80,41 @@ devx/
 ├── README.md
 ├── src/devx/
 │   ├── __init__.py
-│   ├── main.py                 # Entry: TUI or CLI
 │   ├── config.py               # Env vars, API endpoint config
 │   ├── llm.py                  # ChatOpenAI factory
 │   │
 │   ├── agents/                 # Agent definitions
 │   │   ├── __init__.py
 │   │   ├── graph.py            # LangGraph state graph builder
-│   │   ├── supervisor.py       # Supervisor routing logic
-│   │   ├── coding_agent.py     # Coding agent
-│   │   ├── planning_agent.py   # Planning agent
-│   │   └── tools.py            # File, Git, test tools
+│   │   ├── langgraph_supervisor.py # Production graph nodes
+│   │   ├── supervisor.py       # Fallback supervisor runner
+│   │   └── runtime.py          # Tool-calling agent and streaming helpers
 │   │
 │   ├── harness/                # Agentic harness
 │   │   ├── __init__.py
-│   │   ├── state.py            # Session state definition
+│   │   ├── approval.py         # Approval requests and decisions
+│   │   ├── changes.py          # Journal, backups, and rollback
+│   │   ├── runtime.py          # Cancellation token and cancellation error
 │   │   ├── session.py          # Session persistence
-│   │   └── permissions.py      # File access permission rules
+│   │   ├── testing.py          # Test command detection
+│   │   ├── tools.py            # Bounded workspace operations
+│   │   ├── permissions.py      # Ordered file, shell, and extension policy rules
+│   │   ├── tool_registry.py    # Built-in, plugin, and MCP tool registry
+│   │   └── mcp.py              # Stdio MCP lifecycle and tool calls
 │   │
 │   ├── tui/                    # Textual interface
 │   │   ├── app.py              # Main TUI app
-│   │   ├── widgets/
-│   │   │   ├── chat_view.py    # Conversation display
-│   │   │   ├── input_bar.py    # Input bar + @ completion
-│   │   │   └── status_bar.py   # Agent status, token count
-│   │   └── styles.tcss
+│   │   └── app.py              # App, modals, slash commands, workers
 │   │
 │   ├── cli/                    # Typer commands
-│   │   ├── app.py              # Typer app
-│   │   └── commands.py         # Subcommands
+│   │   └── app.py              # Typer app and subcommands
 │   │
 │   ├── token_optim/            # Token optimization
 │   │   ├── __init__.py
 │   │   ├── embeddings.py       # Local embedding wrapper
 │   │   ├── cache.py            # Semantic cache
-│   │   └── context.py          # Context compression
+│   │   ├── context.py           # Relevant-file context selection
+│   │   └── compaction.py        # Bounded session-history compaction
 │   │
 │   └── completion/             # @ completion
 │       ├── __init__.py
@@ -112,6 +122,7 @@ devx/
 │       └── parser.py           # @ mention parser
 │
 └── tests/
+    └── test_benchmark.py       # Offline developer-experience benchmarks
 ```
 
 ---
@@ -429,6 +440,13 @@ def parse_file_mentions(text: str) -> tuple[str, list[Path]]:
 
 **Core idea**: Before sending anything to the inference API, local embeddings serve two purposes: (1) semantic caching of repeated queries, and (2) intelligent selection of relevant file context.
 
+In the shipped implementation, embeddings are opt-in through
+`DEVX_EMBEDDINGS_ENABLED`. `SemanticCache` stores JSON vectors in SQLite and
+namespaces entries by provider, chat model, and embedding model. This prevents
+responses produced by one model or embedder from being reused by another. File
+fingerprints are included in exact cache keys. If embeddings are unavailable,
+context selection falls back to deterministic filename-term scoring.
+
 **Local embedding configuration**:
 
 ```python
@@ -440,7 +458,7 @@ import numpy as np
 class LocalEmbedder:
     """ONNX INT8 local embeddings, no API calls."""
 
-    def __init__(self, model_path: str = "serhiiseletskyi/intelli-embed-v2"):
+    def __init__(self, model_path: str = "sentence-transformers/all-MiniLM-L6-v2"):
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.session = ort.InferenceSession(
             f"{model_path}/onnx/model_quantized.onnx",
@@ -531,7 +549,13 @@ def select_relevant_files(
     if len(candidate_files) <= max_files:
         return candidate_files
 
-    embedder = embedder or LocalEmbedder()
+    # The shipped helper accepts embedder=None and uses deterministic lexical
+    # scoring; callers enable LocalEmbedder explicitly when desired.
+    if embedder is None:
+        terms = {word.lower() for word in query.split() if len(word) > 2}
+        scored = [(sum(term in path.name.lower() for term in terms), -index, path)
+                  for index, path in enumerate(candidate_files)]
+        return [item[2] for item in sorted(scored, reverse=True)[:max_files]]
 
     # Read a snippet of each file (first 500 chars)
     contents = []
@@ -549,18 +573,45 @@ def select_relevant_files(
     return [candidate_files[i] for i in top_indices]
 ```
 
-**Expected token savings**: Local embedding computation uses zero API tokens. Semantic caching saves 100% of inference tokens on repeated queries. Intelligent file selection can reduce large-project context by 60-80%. The combined effect depends on usage patterns, but client-side embedding is pure upside — it only costs local CPU time (~10ms per embedding).
+Local embedding computation uses zero provider API tokens. Actual cache-hit
+rates and context reduction depend on the repository and task, so the project
+ships an offline benchmark harness rather than promising fixed savings.
 
-### 4.7 Minimal Slash Commands
+### 4.7 Permissions and extensibility
 
-Following the "sufficient and minimal" principle, keep only 5 core commands:
+Project-scoped non-secret configuration is loaded from `.devx/config.json`.
+Permission rules are ordered and the last matching `allow`, `ask`, or `deny`
+rule wins. Workspace containment, hard destructive-command blocks, bounded
+execution, and atomic journaled writes remain active regardless of configured
+rules.
+
+The runtime registers built-in tools through `ToolRegistry`, then optionally
+loads explicitly configured workspace Python plugins and stdio MCP servers.
+Plugin and MCP tools use the shared per-run tool-call budget and require
+approval by default. MCP server commands run without a shell and their working
+directories must remain inside the workspace. See
+[Extensibility](extensibility.md) for the configuration contract and examples.
+
+Session messages are compacted locally when their configured message-count or
+character budget is exceeded. Older messages become a bounded summary and
+recent messages remain verbatim; compaction does not make an additional model
+request.
+
+### 4.8 TUI Slash Commands
+
+The TUI supports the following core commands:
 
 | Command | Purpose | Implementation |
 |---|---|---|
 | `/help` | Show available commands and usage | Static text |
 | `/session` | List, switch, and name sessions | Calls `SessionStore` |
-| `/agent` | Switch active agent (coder/planner/tester/docs) | Mutates `DevxState.active_agent` |
+| `/agent` | Choose supervisor, coder, planner, or tester perspective | Updates `requested_agent` |
 | `/clear` | Clear current session context | Resets the `messages` list |
+| `/diff` | Show the bounded current Git diff | Calls `WorkspaceTools.git_diff` |
+| `/undo` | Restore the last run's safe journaled changes | Calls `ChangeJournal.rollback` |
+| `/plan <task>` | Produce a plan without coding or mutations | Runs planner only |
+| `/cancel` | Request cancellation of an active run | Cancels `CancellationToken` |
+| `/copy` | Copy selected or full transcript | Native clipboard helper |
 | `/exit` | Quit the TUI | Triggers Textual `action_quit` |
 
 Interceptors handle input beginning with `/` in the TUI's `Input` widget:
@@ -618,6 +669,9 @@ Set the following in `~/.devx/config.env` (or `~/.dev/config.env`) or your shell
 export DEVX_BASE_URL="https://your-litellm-proxy.com/v1"
 export DEVX_API_KEY="sk-..."
 export DEVX_MODEL="claude-sonnet-4"  # or any LiteLLM alias
+export DEVX_MAX_CONTEXT_FILES="5"
+export DEVX_LINT_COMMAND="ruff check src tests"
+export DEVX_EMBEDDINGS_ENABLED="false"
 ```
 
 ### Usage
@@ -632,6 +686,9 @@ devx tui --session "auth-bug-fix"
 # One-shot CLI query
 devx ask "Fix the login validation logic in @src/auth.py"
 
+# Planning without edits, tests, or project commands
+devx ask --plan-only "Design the login validation refactor"
+
 # List sessions
 devx sessions
 ```
@@ -645,7 +702,7 @@ devx sessions
 | Agent orchestration | LangGraph Supervisor | Coding tasks require centralized file-state management; production-proven |
 | TUI framework | Textual | Async worker model fits long-running agents; rich layout system |
 | CLI framework | Typer | Clean command registration; automatic help text |
-| Local embeddings | intelli-embed-v2 (ONNX INT8) | ~10ms per embedding on CPU; zero API calls; ~98% of Azure quality |
+| Local embeddings | Configured sentence-transformers model | Optional local relevance scoring; zero provider API calls |
 | Model interface | ChatOpenAI with base_url | Any OpenAI-compatible endpoint; 100+ providers via LiteLLM |
 | `@` completion | prompt_toolkit Completer | Mature fuzzy matching; avoid the `@staticmethod` crash pitfall |
 | Session storage | SQLite | Zero configuration; supports concurrent sessions; easy to query |
@@ -654,9 +711,9 @@ devx sessions
 
 ## 7. Extension Directions
 
-1. **Git integration**: Agent automatically diffs and commits after edits; `@diff` mention for review.
-2. **Test-runner agent**: Automatically runs pytest after code edits and triggers a fix loop on failure.
+1. **Richer Git review**: Add file-by-file accept/reject decisions and patch staging around the existing `/diff` workflow.
+2. **Project-aware test policy**: Add per-project test selection and richer lint/test diagnostics around the existing bounded tester loop.
 3. **Project memory**: Embed `AGENTS.md` and code conventions into a local vector store; the agent auto-loads relevant memory at startup.
 4. **Sandboxed execution**: For untrusted generated code, run tests in a subprocess with restricted filesystem write access.
-5. **Streaming tool calls**: Stream tool-call deltas to the TUI for a more responsive feel on long edits.
+5. **Richer streaming**: Stream structured tool-call deltas and timing data to the TUI for a more responsive feel on long edits.
 6. **Per-session model switching**: `/agent` could also switch the underlying model per subagent (e.g., a cheap model for planning, a strong model for coding).

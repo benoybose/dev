@@ -8,7 +8,7 @@ pytest.importorskip("langgraph")
 
 from langgraph.graph import END, START, StateGraph
 
-from dev.agents.langgraph_supervisor import ConfiguredGraph
+from devx.agents.langgraph_supervisor import ConfiguredGraph
 
 
 class CounterState(TypedDict):

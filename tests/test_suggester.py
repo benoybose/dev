@@ -1,6 +1,6 @@
 import asyncio
 
-from dev.completion.suggester import CommandMentionSuggester
+from devx.completion.suggester import CommandMentionSuggester
 
 
 def suggest(suggester: CommandMentionSuggester, value: str) -> str | None:

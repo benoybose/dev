@@ -1,8 +1,10 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from devx.agents.graph import DevState, DevxState, build_dev_graph, build_devx_graph
+from devx.agents.supervisor import SupervisorRunner
 from devx.completion.file_path import FilePathCompleter
 from devx.completion.parser import parse_file_mentions
 from devx.config import Settings
@@ -84,13 +86,13 @@ def test_settings_load_uses_runtime_default_paths():
     assert settings.cache_db.parent.name == ".devx"
 
 
-def test_cli_workspace_is_always_current_directory(tmp_path: Path, monkeypatch):
+def test_workspace_can_be_selected_by_environment(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("DEV_WORKSPACE", str(Path.cwd().parent))
+    monkeypatch.setenv("DEVX_WORKSPACE", str(Path.cwd().parent))
 
     settings = Settings.load()
 
-    assert settings.workspace == tmp_path.resolve()
+    assert settings.workspace == tmp_path.parent.resolve()
 
 
 def test_commands_are_gated_and_dangerous_commands_rejected(tmp_path: Path):
@@ -129,6 +131,15 @@ def test_sessions_can_rename_export_and_import(tmp_path: Path):
     imported_store = SessionStore(tmp_path / "imported.db")
     assert imported_store.load(imported)["name"] == "copy"
     assert imported_store.events(imported)[0]["event"] == {"type": "completed"}
+
+
+def test_deleting_session_also_deletes_event_history(tmp_path: Path):
+    store = SessionStore(tmp_path / "sessions.db")
+    sid = store.save(None, "demo", {"task": "hello"})
+    store.append_event(sid, "run-1", {"type": "completed"})
+
+    assert store.delete(sid)
+    assert store.events(sid) == []
 
 
 def test_graph_has_bounded_result():
@@ -187,6 +198,23 @@ def test_rollback_preserves_backup_file(tmp_path: Path):
     assert backup_file.exists()
 
 
+def test_rollback_keeps_backups_distinct_for_same_named_files(tmp_path: Path):
+    journal = ChangeJournal(tmp_path / "changes.db")
+    tools = WorkspaceTools(PermissionPolicy(tmp_path), journal=journal, run_id="run1", timeout=2)
+    for relative in ("a/file.txt", "b/file.txt"):
+        path = tmp_path / relative
+        path.parent.mkdir()
+        path.write_text("same")
+        assert tools.write(relative, relative, approved=True).ok
+
+    restored = journal.rollback("run1")
+
+    assert sorted(Path(path).relative_to(tmp_path).as_posix() for path in restored) == [
+        "a/file.txt", "b/file.txt"
+    ]
+    assert (tmp_path / "a/file.txt").read_text() == "same"
+    assert (tmp_path / "b/file.txt").read_text() == "same"
+
 def test_sqlite_wal_and_concurrency(tmp_path: Path):
     store = SessionStore(tmp_path / "sessions.db")
     with store._connect() as conn:
@@ -220,7 +248,7 @@ def test_write_cleans_up_tmp_file_on_failure(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(Path, "replace", fail_replace)
     res = tools.write(target, "fail content", approved=True)
     assert not res.ok
-    assert not (tmp_path / ".target.txt.devx-tmp").exists()
+    assert not list(tmp_path.glob(".target.txt.devx-tmp-*"))
 
 
 def test_file_path_completion_filters_clutter(tmp_path: Path):
@@ -247,6 +275,113 @@ def test_file_path_completion_filters_clutter(tmp_path: Path):
     assert "@.git/" not in dot_completions
 
 
+def test_read_and_command_output_are_bounded(tmp_path: Path):
+    target = tmp_path / "large.txt"
+    target.write_text("x" * 100)
+    tools = WorkspaceTools(PermissionPolicy(tmp_path, approval_required=False), max_bytes=10, timeout=2)
+
+    assert len(tools.read(target).output.encode()) <= 10
+    result = tools.run(["python", "-c", "print('x' * 100)"], approved=True)
+    assert len(result.output.encode()) <= 10
+
+
+def test_write_and_replace_previews_do_not_mutate_files(tmp_path: Path):
+    target = tmp_path / "preview.txt"
+    target.write_text("before\n", encoding="utf-8")
+    tools = WorkspaceTools(PermissionPolicy(tmp_path), max_bytes=100, timeout=2)
+
+    write_preview = tools.preview_write(target, "after\n")
+    replace_preview = tools.preview_replace(target, "before", "after")
+
+    assert "-before" in write_preview and "+after" in write_preview
+    assert "-before" in replace_preview and "+after" in replace_preview
+    assert target.read_text(encoding="utf-8") == "before\n"
+
+
+def test_semantic_cache_isolated_by_namespace(tmp_path: Path):
+    database = tmp_path / "cache.db"
+    first = SemanticCache(database, namespace="provider:model:embed-a")
+    second = SemanticCache(database, namespace="provider:model:embed-b")
+
+    first.set("same query", "first response")
+
+    assert first.get("same query") == "first response"
+    assert second.get("same query") is None
+
+
+def test_settings_loads_context_limit_and_lint_command(tmp_path: Path, monkeypatch):
+    (tmp_path / ".env").write_text(
+        "DEVX_MAX_CONTEXT_FILES=3\nDEVX_LINT_COMMAND=ruff check src\n", encoding="utf-8"
+    )
+
+    settings = Settings.load(workspace=tmp_path)
+
+    assert settings.max_context_files == 3
+    assert settings.lint_command == "ruff check src"
+
+
+def test_fallback_supervisor_supports_plan_only(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        "devx.llm.create_llm", lambda _settings: object()
+    )
+    monkeypatch.setattr(
+        "devx.agents.supervisor.invoke_with_retry",
+        lambda _model, _prompt: SimpleNamespace(content="a safe plan"),
+    )
+    settings = Settings(
+        workspace=tmp_path,
+        session_db=tmp_path / "sessions.db",
+        approval_required=False,
+    )
+    state = DevxState(task="inspect the project", files_in_context=[])
+
+    result = SupervisorRunner(
+        settings, ApprovalManager(lambda _request: ApprovalDecision.APPROVE), plan_only=True
+    )(state)
+
+    assert result.status == "plan_only"
+    assert result.result == "a safe plan"
+    assert any(event["type"] == "plan_ready" for event in result.events)
+
+
+def test_supervisor_applies_context_file_cap_without_embeddings(monkeypatch, tmp_path: Path):
+    apple = tmp_path / "apple.py"
+    orange = tmp_path / "orange.py"
+    apple.write_text("apple implementation", encoding="utf-8")
+    orange.write_text("orange implementation", encoding="utf-8")
+    prompts: list[str] = []
+
+    monkeypatch.setattr("devx.llm.create_llm", lambda _settings: object())
+    monkeypatch.setattr(
+        "devx.agents.supervisor.invoke_with_retry",
+        lambda _model, prompt: prompts.append(prompt) or SimpleNamespace(content="plan"),
+    )
+    settings = Settings(
+        workspace=tmp_path,
+        session_db=tmp_path / "sessions.db",
+        max_context_files=1,
+        approval_required=False,
+    )
+    state = DevxState(
+        task="fix apple", files_in_context=[str(apple), str(orange)]
+    )
+
+    SupervisorRunner(
+        settings, ApprovalManager(lambda _request: ApprovalDecision.APPROVE), plan_only=True
+    )(state)
+
+    assert len(state.files_in_context) == 1
+    assert state.files_in_context[0] == str(apple)
+    assert "orange implementation" not in prompts[0]
+
+
+def test_search_output_is_bounded(tmp_path: Path):
+    (tmp_path / "large.txt").write_text("needle " * 100)
+    tools = WorkspaceTools(PermissionPolicy(tmp_path, approval_required=False), max_bytes=25, timeout=2)
+
+    assert len(tools.search("needle").output.encode()) <= 25
+
+
 def test_permission_policy_allows_safe_subcommand_flags(tmp_path: Path):
     policy = PermissionPolicy(tmp_path, approval_required=False)
     assert policy.command(["pytest", "-k", "rm"]) == ["pytest", "-k", "rm"]
@@ -264,4 +399,13 @@ def test_permission_policy_allows_safe_subcommand_flags(tmp_path: Path):
 
     with pytest.raises(PermissionError, match="System-level command"):
         policy.command(["format", "C:"])
+
+    with pytest.raises(PermissionError, match="Destructive command"):
+        policy.command(["env", "rm", "-rf", "."])
+
+    with pytest.raises(PermissionError, match="Destructive command"):
+        policy.command(["sudo", "-u", "user", "rm", "-rf", "."])
+
+    with pytest.raises(PermissionError, match="Destructive command"):
+        policy.command(["python", "-c", "import os; os.remove('x')"])
 

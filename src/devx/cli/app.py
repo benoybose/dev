@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import uuid
+from pathlib import Path
 
 try:
     import typer
@@ -19,13 +21,27 @@ def main() -> None:
     app()
 
 
-if typer:
-    app = typer.Typer(help="devx - local-first AI coding agent")
+if typer is not None:
+    app = typer.Typer(name="devx", help="devx - local-first AI coding agent")
+
+    def _launch_tui(session: str | None = None) -> None:
+        """Launch the TUI, shared by the default entry point and subcommand."""
+        try:
+            from devx.tui.app import DevTUI
+        except ImportError:
+            raise typer.BadParameter("Install the TUI extra: pip install 'devx-coding-agent[tui]'")
+        DevTUI(session_id=session).run()
+
+    @app.callback(invoke_without_command=True)
+    def default_command(ctx: typer.Context) -> None:
+        """Start the TUI when no explicit CLI command is supplied."""
+        if ctx.invoked_subcommand is None:
+            _launch_tui()
 
     @app.command()
-    def ask(prompt: str, session: str | None = typer.Option(None), json_output: bool = typer.Option(False, "--json"), approve: bool = typer.Option(False, "--approve-all")):
+    def ask(prompt: str, session: str | None = typer.Option(None), json_output: bool = typer.Option(False, "--json"), approve: bool = typer.Option(False, "--approve-all"), plan_only: bool = typer.Option(False, "--plan-only")):
         """Run a single coding-agent query."""
-        from devx.agents.graph import DevxState, build_supervisor_graph
+        from devx.agents.graph import DevState, build_supervisor_graph
         from devx.completion.parser import parse_file_mentions
         from devx.harness.approval import ApprovalManager, ApprovalRequest
         configure_logging()
@@ -36,7 +52,7 @@ if typer:
             raise typer.BadParameter("Unknown or out-of-workspace mentions: " + ", ".join(missing))
         store = SessionStore(settings.session_db)
         previous = store.load(session) if session else None
-        state = DevxState(task=cleaned, files_in_context=[str(path) for path in files])
+        state = DevState(task=cleaned, files_in_context=[str(path) for path in files])
         if previous:
             prior_state = previous["state"]
             state.messages = prior_state.get("messages", [])
@@ -47,10 +63,17 @@ if typer:
                 return True
             typer.echo(f"\nRequested action: {request.action}\nTarget: {request.target}\n{request.reason}")
             return typer.confirm("Approve this action?", default=False)
-        result = build_supervisor_graph(settings, ApprovalManager(ask_approval), state.files_in_context,
-                                        session_id=previous["id"] if previous else session).invoke(state)
+        run_id = str(uuid.uuid4())
+        result = build_supervisor_graph(
+            settings,
+            ApprovalManager(ask_approval),
+            state.files_in_context,
+            run_id=run_id,
+            session_id=previous["id"] if previous else session,
+            plan_only=plan_only,
+        ).invoke(state)
         if session:
-            store.save(previous["id"] if previous else None, session, result)
+            store.save(previous["id"] if previous else None, session, result, {"last_run_id": run_id})
         print(json.dumps(result) if json_output else result["result"])
 
     @app.command()
@@ -60,8 +83,10 @@ if typer:
             print(f"{item['id'][:8]}  {item['name']}  {item['updated_at']}")
 
     @app.command("session")
-    def session_command(action: str = typer.Argument(..., help="list, events, or delete"), identifier: str | None = typer.Argument(None)):
-        """Inspect or remove a saved session."""
+    def session_command(action: str = typer.Argument(..., help="list, events, delete, rename, export, or import"),
+                        identifier: str | None = typer.Argument(None),
+                        value: str | None = typer.Argument(None)):
+        """Inspect, modify, export, or import a saved session."""
         store = SessionStore(Settings.load().session_db)
         if action == "list":
             for item in store.list_sessions():
@@ -72,8 +97,21 @@ if typer:
         elif action == "delete" and identifier:
             if not store.delete(identifier):
                 raise typer.BadParameter(f"Session not found: {identifier}")
+        elif action == "rename" and identifier and value:
+            if not store.rename(identifier, value):
+                raise typer.BadParameter(f"Session not found: {identifier}")
+        elif action == "export" and identifier and value:
+            try:
+                typer.echo(store.export_session(identifier, Path(value)))
+            except (KeyError, OSError) as exc:
+                raise typer.BadParameter(str(exc)) from exc
+        elif action == "import" and identifier:
+            try:
+                typer.echo(store.import_session(Path(identifier), value))
+            except (OSError, TypeError, ValueError) as exc:
+                raise typer.BadParameter(str(exc)) from exc
         else:
-            raise typer.BadParameter("Use: devx session list|events ID|delete ID")
+            raise typer.BadParameter("Use: devx session list|events ID|delete ID|rename ID NAME|export ID PATH|import PATH [NAME]")
 
     @app.command()
     def doctor():
@@ -91,8 +129,4 @@ if typer:
     @app.command()
     def tui(session: str | None = typer.Option(None)):
         """Launch the interactive terminal UI."""
-        try:
-            from devx.tui.app import DevxTUI
-        except ImportError:
-            raise typer.BadParameter("Install the TUI extra: pip install 'devx-coding-agent[tui]'")
-        DevxTUI(session_id=session).run()
+        _launch_tui(session)

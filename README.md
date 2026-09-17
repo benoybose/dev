@@ -34,9 +34,15 @@ Under the hood, `devx` uses a **LangGraph supervisor workflow** (planner → cod
 |---|---|
 | **LangGraph supervisor** | Explicit planner → coder → tester state machine with conditional branching, loops, and interrupt/resume |
 | **Approval-gated tools** | All file writes and shell commands require explicit user approval by default |
-| **Atomic writes & rollback** | Every approved write is atomic, backed up, and recorded with before/after hashes; rollback via `/rollback` |
+| **Safe review and recovery** | Approved writes show bounded diffs, are atomic and journaled, and can be undone with `/undo` |
 | **SQLite sessions** | Persistent session state, event history, and checkpoint-compatible run IDs |
 | **@ file mentions** | Reference files/directories with `@` syntax; fuzzy completion in TUI |
+| **Plan-only workflow** | Preview a plan from the CLI or TUI without edits or project commands |
+| **Bounded execution** | File reads, command output, context, iterations, and tool calls have configurable limits |
+| **Configurable permissions** | Ordered project rules can allow, ask, or deny reads, edits, shell commands, plugins, and MCP tools |
+| **Automatic compaction** | Long session histories are summarized locally while recent work remains available |
+| **Extensible tools** | Workspace plugins and stdio MCP servers register tools through the same approval and budget controls |
+| **Cancellation** | Cancel active TUI runs and terminate active project commands safely |
 | **Multi-provider support** | OpenAI, Anthropic, Google, Azure, LiteLLM, Ollama, or any OpenAI-compatible endpoint |
 | **Local token optimization** | Optional ONNX INT8 embeddings for semantic cache and context compression (zero API calls) |
 | **LangSmith tracing** | Optional tracing integration for debugging agent runs |
@@ -80,9 +86,15 @@ Under the hood, `devx` uses a **LangGraph supervisor workflow** (planner → cod
 
 - **`src/devx/agents/graph.py`** — LangGraph state graph builder; orchestrates planner, coder, and tester stages with conditional branching
 - **`src/devx/harness/tools.py`** — `WorkspaceTools`: read, write, replace, search, `git_diff`, and `run` (shell commands)
+- **`src/devx/harness/tool_registry.py`** — built-in, workspace plugin, and MCP tool registration
+- **`src/devx/harness/mcp.py`** — bounded stdio MCP initialization, discovery, and tool calls
 - **`src/devx/harness/approval.py`** — `ApprovalManager` gates all mutations (writes, command execution)
+- **`src/devx/harness/permissions.py`** — workspace containment and ordered allow/ask/deny rules
 - **`src/devx/harness/session.py`** — `SessionStore` (SQLite CRUD + event log)
 - **`src/devx/harness/changes.py`** — `ChangeJournal` (atomic writes, backups, rollback support)
+- **`src/devx/token_optim/context.py`** — bounded context assembly and deterministic relevance selection
+- **`src/devx/token_optim/compaction.py`** — bounded local session-history compaction
+- **`src/devx/token_optim/cache.py`** — optional semantic cache isolated by provider/model/embedder namespace
 - **`src/devx/tui/app.py`** — `DevxTUI` (Textual app)
 - **`src/devx/cli/app.py`** — Typer CLI entrypoint
 
@@ -132,7 +144,7 @@ pip install -e ".[agent,anthropic,google,embeddings,tracing,dev]"
 
 ## Configuration
 
-`devx` loads configuration from **`~/.devx/config.env`** (or legacy `~/.dev/config.env`) **and** environment variables. The precedence order is: environment variables > `config.env` > built-in defaults.
+`devx` loads configuration from environment variables, a workspace `.env`, and **`~/.devx/config.env`** (or legacy `~/.dev/config.env`). The precedence order is: environment variables > workspace `.env` > user config > built-in defaults.
 
 ### Environment Variables
 
@@ -153,7 +165,12 @@ Both `DEVX_*` and legacy `DEV_*` variable names are supported, with `DEVX_*` tak
 | `DEVX_COMMAND_TIMEOUT` | `120` | Shell command timeout in seconds |
 | `DEVX_TEST_COMMAND` | `""` (auto-detect) | Custom test command for tester agent |
 | `DEVX_MAX_FILE_BYTES` | `1000000` | Maximum file size to read (bytes) |
+| `DEVX_MAX_CONTEXT_FILES` | `5` | Maximum files selected for each run; lexical selection is used when embeddings are disabled |
+| `DEVX_LINT_COMMAND` | `""` | Optional lint command run before tests |
 | `DEVX_EMBEDDINGS_ENABLED` | `false` | Enable local ONNX embeddings for token optimization |
+| `DEVX_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Local embedding model identifier |
+| `DEVX_EMBEDDING_CACHE_DIR` | `~/.cache/devx/embeddings` | Local embedding model cache directory |
+| `DEVX_EMBEDDINGS_OFFLINE` | `false` | Prevent embedding model downloads |
 | `LANGSMITH_TRACING` | `false` | Enable LangSmith tracing |
 
 ### Example `~/.devx/config.env`
@@ -170,6 +187,44 @@ DEVX_EMBEDDINGS_ENABLED=true
 ```
 
 > **Note:** Quoted values are supported in `config.env`.
+
+### Project permissions, plugins, MCP, and compaction
+
+Optional non-secret project settings live in `.devx/config.json`. The file is
+explicitly project-scoped; plugin imports and MCP server processes only start
+when configured.
+
+```json
+{
+  "permissions": [
+    { "action": "read", "resource": "**", "effect": "allow" },
+    { "action": "edit", "resource": "tests/**", "effect": "allow" },
+    { "action": "shell", "resource": "git diff *", "effect": "allow" },
+    { "action": "shell", "resource": "rm *", "effect": "deny" }
+  ],
+  "plugins": [".devx/plugins"],
+  "mcp_servers": [
+    {
+      "name": "local-tools",
+      "command": ["python", ".devx/mcp_server.py"],
+      "timeout": 30
+    }
+  ],
+  "context_compaction": {
+    "enabled": true,
+    "max_messages": 24,
+    "max_chars": 24000,
+    "summary_chars": 4000
+  }
+}
+```
+
+Rules are evaluated in order and the last matching rule wins. `deny` always
+wins over approval callbacks and the existing destructive-command checks remain
+active. A Python plugin exports `register(registry)` and registers ordinary
+typed Python functions. MCP servers use the stdio transport and expose tools
+from `tools/list`; every plugin and MCP call still passes through the approval
+policy and per-run tool-call budget.
 
 ---
 
@@ -211,12 +266,15 @@ Run a single agent task.
 devx ask "explain @src/main.py"
 devx ask --session my-project "fix the bug in @src/utils.py"
 devx ask --approve-all "run tests and fix failures"   # trusted workspaces only
+devx ask --plan-only "design the authentication refactor"  # plan without edits
 ```
 
 | Option | Description |
 |---|---|
 | `--session NAME` | Resume or create a named session |
+| `--json` | Emit the complete run state as JSON for automation |
 | `--approve-all` | Auto-approve all writes and commands (use only in trusted, isolated workspaces) |
+| `--plan-only` | Create the plan and stop before coding, testing, or mutations |
 
 ### `devx tui`
 
@@ -274,8 +332,10 @@ Launch the TUI with `devx tui`.
 - **@ file mentions** — Type `@` to reference files or directories; fuzzy completion is provided
 - **Slash commands** — Control sessions and agent behavior (see below)
 - **Approval prompts** — Inline approval requests for writes and commands
+- **Approval previews** — Bounded proposed diffs are shown before file mutations
 - **Session management** — Resume, create, and delete sessions from the sidebar
-- **Diff view** — Inspect before/after diffs for every approved write
+- **Diff and recovery** — Inspect the current Git diff with `/diff` and undo the last run with `/undo`
+- **Cancellation** — Stop an active run with `/cancel`
 
 ---
 
@@ -283,13 +343,24 @@ Launch the TUI with `devx tui`.
 
 | Command | Description |
 |---|---|
-| `/rollback` | Roll back the last approved file change (only if the file has not been modified after the run) |
-| `/approve` | Approve a pending write or command |
-| `/reject` | Reject a pending write or command |
+| `/diff` | Show the current bounded Git diff without changing files |
+| `/undo` (or `/rollback`) | Undo the last run's approved file changes when files are unchanged afterward |
+| `/plan <task>` | Create a plan without editing or running project commands |
+| `/cancel` | Request cancellation of the active run |
+| `/copy` | Copy the selected or full transcript |
+| `/setup`, `/provider`, `/model` | Configure provider and model settings |
+| `/session ...` | List, switch, rename, export, or import sessions |
 | `/clear` | Clear the current conversation |
 | `/help` | Show help for available commands |
 
 > **Note:** The command set is minimal by design. Additional commands may be added in future releases.
+
+The offline benchmark suite measures the bounded-output, command-safety, rollback,
+and context-budget primitives without contacting a model:
+
+```bash
+python scripts/benchmark.py
+```
 
 ---
 
@@ -320,6 +391,7 @@ By default, `devx` is designed with a security-first approach:
 - **Atomic writes** — File writes are atomic with automatic backups and before/after hashes
 - **No auto-commits** — The agent never commits Git changes automatically; inspect diffs and commit yourself
 - **Bounded shell execution** — Commands run with `shell=False`, bounded output, configurable timeouts, and process cleanup
+- **Extension approval** — Workspace plugins and MCP tools require approval by default and remain subject to tool-call budgets
 - **Secret redaction** — API keys and tokens are redacted from logs and traces
 - **No auto-approve** — `--approve-all` is explicitly opt-in and intended only for trusted, isolated workspaces
 
@@ -361,7 +433,20 @@ devx ask "hello world"
 Run the test suite with pytest:
 
 ```bash
-pytest
+python -m pytest -q
+```
+
+Run the provider-contract checks separately when validating tool-calling
+compatibility:
+
+```bash
+python -m pytest -q tests/test_provider_contract.py
+```
+
+The offline benchmark suite is also part of the validation workflow:
+
+```bash
+python scripts/benchmark.py
 ```
 
 The test configuration is defined in `pyproject.toml`:
@@ -389,7 +474,7 @@ pyright
 
 The project uses GitHub Actions for continuous integration and automated PyPI releases:
 
-- `.github/workflows/ci.yml` — Runs tests, lint, and type checks on every push and pull request
+- `.github/workflows/ci.yml` — Runs tests, lint, compilation, benchmarks, and security checks on every push and pull request
 - `.github/workflows/release.yml` — Automates PyPI releases on version tags
 
 ---
@@ -401,7 +486,7 @@ See [docs/roadmap.md](docs/roadmap.md) for the full roadmap.
 Current priorities:
 
 - Multi-file refactoring support
-- RAG-based codebase context
+- Smarter project-wide context indexing and retrieval
 - Extension system (custom tools, custom agents)
 - Web-based dashboard for session history and diffs
 
@@ -414,7 +499,7 @@ Contributions are welcome. Please:
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Ensure tests pass (`pytest`) and linting passes (`ruff check src/`)
+4. Ensure tests pass (`python -m pytest -q`) and linting passes (`python -m ruff check src tests scripts`)
 5. Submit a pull request
 
 ---

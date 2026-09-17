@@ -1,6 +1,14 @@
 import asyncio
 
+import pytest
+
 from devx.tui.app import DevTUI, DevxTUI
+
+
+@pytest.fixture(autouse=True)
+def configured_provider(monkeypatch):
+    monkeypatch.setenv("DEVX_PROVIDER", "openrouter")
+    monkeypatch.setenv("DEVX_API_KEY", "test-key")
 
 
 def test_textual_app_smoke():

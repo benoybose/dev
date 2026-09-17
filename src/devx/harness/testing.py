@@ -8,7 +8,8 @@ def detect_test_command(workspace: Path) -> str | None:
     """Return a conservative test command based on project metadata.
 
     Commands are selected from repository markers only; user configuration
-    remains authoritative through ``DEV_TEST_COMMAND``. The returned command
+    remains authoritative through ``DEVX_TEST_COMMAND`` (with legacy
+    ``DEV_TEST_COMMAND`` compatibility). The returned command
     is later passed through the normal approval and command-policy gates.
     """
     if ((workspace / "pyproject.toml").exists() or (workspace / "pytest.ini").exists()

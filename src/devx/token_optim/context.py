@@ -10,7 +10,10 @@ def select_relevant_files(query: str, candidate_files: list[Path], max_files: in
     if embedder is not None:
         try:
             q = embedder.embed([query])[0]
-            contents = [f.read_text(encoding="utf-8", errors="ignore")[:2000] for f in candidate_files]
+            contents = []
+            for path in candidate_files:
+                with path.open("rb") as stream:
+                    contents.append(stream.read(2000).decode("utf-8", errors="ignore"))
             vectors = embedder.embed(contents)
             try:
                 import numpy as np
@@ -36,7 +39,8 @@ def read_context(files: list[Path], max_file_bytes: int = 1_000_000, max_total_b
         if total >= max_total_bytes:
             break
         try:
-            content = path.read_text(encoding="utf-8", errors="replace")[:max_file_bytes]
+            with path.open("rb") as stream:
+                content = stream.read(max_file_bytes).decode("utf-8", errors="replace")
         except OSError:
             continue
         remaining = max_total_bytes - total

@@ -2,10 +2,10 @@ import asyncio
 import json
 from pathlib import Path
 
-from dev import configuration
-from dev.config import Settings
-from dev.harness.session import SessionStore
-from dev.tui.app import DevTUI
+from devx import configuration
+from devx.config import Settings
+from devx.harness.session import SessionStore
+from devx.tui.app import DevTUI
 
 
 async def submit_command(pilot, command: str) -> None:
@@ -23,7 +23,7 @@ def test_live_model_discovery_flows_through_tui_to_model_selection(monkeypatch, 
         workspace=tmp_path,
         session_db=tmp_path / "sessions.db",
     )
-    monkeypatch.setattr("dev.config.Settings.load", staticmethod(lambda: settings))
+    monkeypatch.setattr("devx.config.Settings.load", staticmethod(lambda: settings))
     saved_models: list[str] = []
 
     class FakeUserConfig:
@@ -70,7 +70,7 @@ def test_curated_model_catalog_is_selectable_from_tui(monkeypatch, tmp_path: Pat
         workspace=tmp_path,
         session_db=tmp_path / "sessions.db",
     )
-    monkeypatch.setattr("dev.config.Settings.load", staticmethod(lambda: settings))
+    monkeypatch.setattr("devx.config.Settings.load", staticmethod(lambda: settings))
     saved_models: list[str] = []
 
     class FakeUserConfig:
@@ -105,7 +105,7 @@ def test_session_switch_rehydrates_transcript_through_tui(monkeypatch, tmp_path:
         workspace=tmp_path,
         session_db=store_path,
     )
-    monkeypatch.setattr("dev.config.Settings.load", staticmethod(lambda: settings))
+    monkeypatch.setattr("devx.config.Settings.load", staticmethod(lambda: settings))
 
     async def run() -> None:
         async with DevTUI(session_id="default").run_test() as pilot:
@@ -126,7 +126,7 @@ def test_config_show_masks_secret_through_tui(monkeypatch, tmp_path: Path):
         model="coding-model",
         workspace=tmp_path,
     )
-    monkeypatch.setattr("dev.config.Settings.load", staticmethod(lambda: settings))
+    monkeypatch.setattr("devx.config.Settings.load", staticmethod(lambda: settings))
 
     async def run() -> None:
         async with DevTUI().run_test() as pilot:
@@ -145,7 +145,7 @@ def test_command_safety_and_config_reload_are_visible(monkeypatch, tmp_path: Pat
         model="coding-model",
         workspace=tmp_path,
     )
-    monkeypatch.setattr("dev.config.Settings.load", staticmethod(lambda: settings))
+    monkeypatch.setattr("devx.config.Settings.load", staticmethod(lambda: settings))
 
     async def run() -> None:
         async with DevTUI().run_test() as pilot:
@@ -167,7 +167,7 @@ def test_missing_session_reports_error_without_changing_active_session(monkeypat
         workspace=tmp_path,
         session_db=tmp_path / "sessions.db",
     )
-    monkeypatch.setattr("dev.config.Settings.load", staticmethod(lambda: settings))
+    monkeypatch.setattr("devx.config.Settings.load", staticmethod(lambda: settings))
 
     async def run() -> None:
         async with DevTUI(session_id="default").run_test() as pilot:
